@@ -1,6 +1,23 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-14 iter 6 — deeper goals + riders, per user request]
+- Goal depth 14 -> 26, and on a score the ball is shoved on into the barn (kept low so it stays in the
+  goal mouth) instead of popping up in place — you now watch it roll all the way into the deep goal.
+- Ball stays clamped in the goal volume during the goal celebration so it can't snap back onto the pitch.
+- Added a hillbilly driver at the wheel of the mowing tractors (cows already carry a rider).
+- Verified: node --check + smoke harness pass; drove it in-browser (tractor driver + ball rolling all the way in).
+[2026-07-14 iter 5 — BARNYARD MAKEOVER, per user request]
+- Arena is now inside a giant barn: barn-red plank side walls, pitched roof with ridge + tie-beam rafters,
+  hay-loft windows, work-lights strung from the rafters (replaces the open sunset stadium).
+- Goals are the barn doors: each end is a plank gable wall with the doorway as the goal mouth, timber frame,
+  team-color header beam, two swung-open door leaves (white X-brace), dark barn-interior recess behind.
+- Sidelines lined with stacks of round hay bales (the "boards").
+- Crowd reworked: hillbillies (overalls, plaid, straw hats) perched on hay bales, still bounce on goals;
+  barnyard critters (cows, pigs, chickens, goats) milling behind them.
+- Vehicles reskinned (physics/stats unchanged): car-class picks (pickup/muscle/mower) are ride-on MOWING
+  TRACTORS; big picks (monster/tractor) are COWS with a hick in the saddle. Lobby names/flavor updated to match.
+- Verified: node --check + smoke harness all pass.
 [2026-07-14 iter 4 — camera & wall visibility, per user request + real RL specs]
 - Camera rebuilt on real Rocket League defaults (scaled): FOV 110h→80v, distance/height ≈ RL 270uu/110uu,
   stiffness ~0.45 lerp, smoothed swivel (no snap-look), slight downward angle
@@ -208,18 +225,18 @@ STILL TO DO (ideas for future iterations):
    ============================================================ */
 
 // ---------------- CONSTANTS ----------------
-const ARENA = { halfX: 82, halfZ: 52, wallH: 26, ceil: 38, goalHalfW: 15, goalH: 12, goalDepth: 14 };
+const ARENA = { halfX: 82, halfZ: 52, wallH: 26, ceil: 38, goalHalfW: 15, goalH: 12, goalDepth: 26 };
 const BALL_R = 4.4;
 const GRAV_CAR = -34, GRAV_BALL = -24;
 const CAR_COLL_R = 3.0;
 const SUPERSONIC = 46;
 
 const VEHICLES = [
-  { id:'pickup',  name:'Rusty Rita',        flavor:'A \'78 shortbed held together by duct tape, Hank Williams, and pure spite.', top:44, accel:38, turn:2.6, power:1.0, scale:1.0 },
-  { id:'muscle',  name:'Shine Runner',      flavor:'Outran three state troopers and one ex-wife. Smells like nitro and regret.',  top:50, accel:42, turn:2.2, power:0.9, scale:0.95 },
+  { id:'pickup',  name:'Deere John',        flavor:'Ride-on mower that cuts grass, corners, and grudges. Duct tape and pure spite.', top:44, accel:38, turn:2.6, power:1.0, scale:1.0 },
+  { id:'muscle',  name:'Turbo Trimmer',     flavor:'Souped-up zero-turn. Idles like a chainsaw, corners like a threat.',           top:50, accel:42, turn:2.2, power:0.9, scale:0.95 },
   { id:'mower',   name:'Grass Assassin',    flavor:'Zero-turn ridin\' mower. Cuts grass, cuts corners, cuts you off.',            top:38, accel:36, turn:3.4, power:0.8, scale:0.85 },
-  { id:'monster', name:'Big Bubba',         flavor:'Monster truck with a lift kit taller than Bubba\'s child support bill.',      top:41, accel:32, turn:2.0, power:1.35, scale:1.25 },
-  { id:'tractor', name:'Ol\' Smokey',       flavor:'Grandpa\'s tractor. Slower than molasses, hits like a divorce.',              top:36, accel:30, turn:2.1, power:1.5, scale:1.15 },
+  { id:'monster', name:'Big Bessie',        flavor:'A 2,000-lb heifer with a hick in the saddle. Moo-ves the ball AND the earth.', top:41, accel:32, turn:2.0, power:1.35, scale:1.25 },
+  { id:'tractor', name:'Sir Loin',          flavor:'Grandpa\'s prize steer, saddled up. Slower than molasses, hits like a stampede.', top:36, accel:30, turn:2.1, power:1.5, scale:1.15 },
 ];
 
 const BOT_NAMES = ['Cletus','Bobby Ray','Skeeter','Darlene','Junior','Rooster','Tammy Lynn','Earl','Peanut','Doyle'];
@@ -505,6 +522,92 @@ function makeCanvasTex(w, h, draw){
   const t = new THREE.CanvasTexture(c); return t;
 }
 
+// ---------------- BARNYARD KIT (shared textures + critters) ----------------
+// weathered barn-red plank texture (walls, doors)
+const barnPlankTex = makeCanvasTex(256, 256, (g,w,h)=>{
+  g.fillStyle = '#8a2417'; g.fillRect(0,0,w,h);
+  for(let x=0;x<w;x+=32){
+    g.fillStyle = ((x/32)|0)%2 ? '#7c1e13' : '#95291b';
+    g.fillRect(x, 0, 30, h);
+    g.fillStyle = 'rgba(0,0,0,0.28)'; g.fillRect(x+30, 0, 2, h);   // plank seam
+  }
+  for(let i=0;i<26;i++){                                            // knots + weathering
+    g.fillStyle = 'rgba(35,12,8,'+(0.14+Math.random()*0.22)+')';
+    g.beginPath(); g.ellipse(Math.random()*w, Math.random()*h, 3+Math.random()*5, 2+Math.random()*4, 0, 0, 7); g.fill();
+  }
+});
+// Holstein cow hide (white w/ black splotches)
+const cowHideTex = makeCanvasTex(128,128,(g,w,h)=>{
+  g.fillStyle='#f4f0e8'; g.fillRect(0,0,w,h);
+  g.fillStyle='#26211c';
+  for(let i=0;i<7;i++){ g.beginPath(); g.ellipse(Math.random()*w, Math.random()*h, 8+Math.random()*20, 6+Math.random()*16, Math.random()*3, 0, 7); g.fill(); }
+});
+
+// one shared round-bale geo/mat, reused for every bale (cheap)
+const hayGeo = new THREE.CylinderGeometry(2.4,2.4,4.6,10);
+const hayMat = new THREE.MeshLambertMaterial({ color:0xd8b24a });
+function hayBale(x,y,z, faceZ=true){
+  const m = new THREE.Mesh(hayGeo, hayMat); m.position.set(x,y,z);
+  if(faceZ) m.rotation.x = Math.PI/2; else m.rotation.z = Math.PI/2;  // round swirl faces the pitch
+  m.receiveShadow = true; return m;
+}
+
+const skinTones = [0xd9a066, 0xc98a5a, 0xe8b880, 0xb87a4a];
+const plaidCols = [0xa03030, 0x30702a, 0x2a4a8a, 0xa07030, 0x8a3a8a, 0xb0b0b0];
+// a seated hillbilly spectator (also used as the cow rider)
+function makeHick(){
+  const grp = new THREE.Group();
+  const denim = new THREE.MeshLambertMaterial({ color: Math.random()<0.5?0x35507a:0x3a3f2a });
+  const shirt = new THREE.MeshLambertMaterial({ color: pick(plaidCols) });
+  const skin  = new THREE.MeshLambertMaterial({ color: pick(skinTones) });
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(1.3,1.2,0.9), shirt); torso.position.y=1.5; grp.add(torso);
+  const bib   = new THREE.Mesh(new THREE.BoxGeometry(1.0,1.4,0.55), denim); bib.position.set(0,1.15,0.32); grp.add(bib);
+  const legL  = new THREE.Mesh(new THREE.BoxGeometry(0.46,0.5,1.6), denim); legL.position.set(-0.34,0.55,0.7); grp.add(legL);
+  const legR  = legL.clone(); legR.position.set(0.34,0.55,0.7); grp.add(legR);
+  const head  = new THREE.Mesh(new THREE.SphereGeometry(0.5,8,6), skin); head.position.y=2.5; grp.add(head);
+  const brim  = new THREE.Mesh(new THREE.CylinderGeometry(0.85,0.85,0.12,12), new THREE.MeshLambertMaterial({color:0xd9b04a}));
+  brim.position.y=2.82; grp.add(brim);
+  const crown = new THREE.Mesh(new THREE.ConeGeometry(0.5,0.6,12), new THREE.MeshLambertMaterial({color:0xcaa23f}));
+  crown.position.y=3.12; grp.add(crown);
+  if(Math.random()<0.5){ const beard=new THREE.Mesh(new THREE.BoxGeometry(0.6,0.4,0.2),
+    new THREE.MeshLambertMaterial({color:Math.random()<0.5?0x6a4a2a:0x9a9a9a})); beard.position.set(0,2.18,0.42); grp.add(beard); }
+  return grp;
+}
+// low-poly barnyard animals
+function makeAnimal(kind){
+  const grp = new THREE.Group();
+  if(kind==='cow'){
+    const body=new THREE.Mesh(new THREE.BoxGeometry(2.4,1.4,1.3), new THREE.MeshLambertMaterial({map:cowHideTex})); body.position.y=1.4; grp.add(body);
+    const head=new THREE.Mesh(new THREE.BoxGeometry(0.9,0.9,0.8), new THREE.MeshLambertMaterial({color:0xf4f0e8})); head.position.set(1.5,1.6,0); grp.add(head);
+    const snout=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.5,0.6), new THREE.MeshLambertMaterial({color:0xe0a0a0})); snout.position.set(1.95,1.4,0); grp.add(snout);
+    [0.32,-0.32].forEach(z=>{ const hn=new THREE.Mesh(new THREE.ConeGeometry(0.12,0.4,6), new THREE.MeshLambertMaterial({color:0xe8e0c8})); hn.position.set(1.4,2.15,z); grp.add(hn); });
+    [[0.9,0.5],[0.9,-0.5],[-0.9,0.5],[-0.9,-0.5]].forEach(([x,z])=>{ const lg=new THREE.Mesh(new THREE.CylinderGeometry(0.18,0.18,1.0,6), new THREE.MeshLambertMaterial({color:0x2a2a2a})); lg.position.set(x,0.5,z); grp.add(lg); });
+    const ud=new THREE.Mesh(new THREE.SphereGeometry(0.32,8,6), new THREE.MeshLambertMaterial({color:0xf0b0b0})); ud.position.set(-0.6,0.7,0); grp.add(ud);
+  } else if(kind==='pig'){
+    const pink=new THREE.MeshLambertMaterial({color:0xe89aa6});
+    const body=new THREE.Mesh(new THREE.BoxGeometry(1.8,1.0,1.0),pink); body.position.y=0.9; grp.add(body);
+    const head=new THREE.Mesh(new THREE.BoxGeometry(0.7,0.7,0.7),pink); head.position.set(1.1,1.0,0); grp.add(head);
+    const snout=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.22,0.25,8),new THREE.MeshLambertMaterial({color:0xd98a96})); snout.rotation.z=Math.PI/2; snout.position.set(1.5,0.95,0); grp.add(snout);
+    [0.35,-0.35].forEach(z=>{ const ear=new THREE.Mesh(new THREE.ConeGeometry(0.16,0.3,5),pink); ear.position.set(1.0,1.4,z); grp.add(ear); });
+    [[0.6,0.35],[0.6,-0.35],[-0.6,0.35],[-0.6,-0.35]].forEach(([x,z])=>{ const lg=new THREE.Mesh(new THREE.CylinderGeometry(0.14,0.14,0.6,6),pink); lg.position.set(x,0.3,z); grp.add(lg); });
+  } else if(kind==='chicken'){
+    const wh=new THREE.MeshLambertMaterial({color:0xf2f2ea});
+    const body=new THREE.Mesh(new THREE.SphereGeometry(0.5,8,6),wh); body.position.y=0.7; body.scale.set(1,1.1,1.3); grp.add(body);
+    const head=new THREE.Mesh(new THREE.SphereGeometry(0.28,8,6),wh); head.position.set(0,1.2,0.4); grp.add(head);
+    const comb=new THREE.Mesh(new THREE.BoxGeometry(0.1,0.22,0.3),new THREE.MeshLambertMaterial({color:0xcc3322})); comb.position.set(0,1.45,0.4); grp.add(comb);
+    const beak=new THREE.Mesh(new THREE.ConeGeometry(0.1,0.25,5),new THREE.MeshLambertMaterial({color:0xe0a02a})); beak.rotation.x=Math.PI/2; beak.position.set(0,1.15,0.72); grp.add(beak);
+    [0.12,-0.12].forEach(x=>{ const lg=new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,0.4,4),new THREE.MeshLambertMaterial({color:0xe0a02a})); lg.position.set(x,0.2,0); grp.add(lg); });
+  } else { // goat
+    const gr=new THREE.MeshLambertMaterial({color:0xd8d2c4});
+    const body=new THREE.Mesh(new THREE.BoxGeometry(1.6,0.9,0.9),gr); body.position.y=1.0; grp.add(body);
+    const head=new THREE.Mesh(new THREE.BoxGeometry(0.6,0.6,0.6),gr); head.position.set(1.0,1.2,0); grp.add(head);
+    [0.2,-0.2].forEach(z=>{ const hn=new THREE.Mesh(new THREE.ConeGeometry(0.1,0.4,5),new THREE.MeshLambertMaterial({color:0x8a7a5a})); hn.position.set(0.95,1.62,z); hn.rotation.x=-0.5; grp.add(hn); });
+    const beard=new THREE.Mesh(new THREE.BoxGeometry(0.2,0.35,0.15),gr); beard.position.set(1.22,0.85,0); grp.add(beard);
+    [[0.5,0.3],[0.5,-0.3],[-0.5,0.3],[-0.5,-0.3]].forEach(([x,z])=>{ const lg=new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.12,0.9,6),new THREE.MeshLambertMaterial({color:0x555044})); lg.position.set(x,0.45,z); grp.add(lg); });
+  }
+  return grp;
+}
+
 // sunset sky dome
 const skyTex = makeCanvasTex(1024, 512, (g,w,h)=>{
   const grad = g.createLinearGradient(0,0,0,h);
@@ -581,55 +684,77 @@ const mud = new THREE.Mesh(
 mud.rotation.x = -Math.PI/2; mud.position.y = -0.05;
 scene.add(mud);
 
-// walls (transparent panels), with goal openings on ±X ends
-const wallMat = new THREE.MeshLambertMaterial({ color:0x88aacc, transparent:true, opacity:0.05, side:THREE.DoubleSide });
-function addWall(w, h, x, y, z, ry){
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(w,h), wallMat);
-  m.position.set(x,y,z); m.rotation.y = ry; scene.add(m);
-}
-addWall(ARENA.halfX*2, ARENA.wallH, 0, ARENA.wallH/2,  ARENA.halfZ, 0);
-addWall(ARENA.halfX*2, ARENA.wallH, 0, ARENA.wallH/2, -ARENA.halfZ, 0);
-{ // end walls with goal hole
-  const sideW = ARENA.halfZ - ARENA.goalHalfW;
-  [1,-1].forEach(sx=>{
-    addWall(sideW, ARENA.wallH, sx*ARENA.halfX, ARENA.wallH/2, ARENA.goalHalfW + sideW/2, Math.PI/2);
-    addWall(sideW, ARENA.wallH, sx*ARENA.halfX, ARENA.wallH/2, -(ARENA.goalHalfW + sideW/2), Math.PI/2);
-    addWall(ARENA.goalHalfW*2, ARENA.wallH - ARENA.goalH, sx*ARENA.halfX, ARENA.goalH + (ARENA.wallH-ARENA.goalH)/2, 0, Math.PI/2);
-  });
-}
-// glowing top rails so ya can still tell where the glass is
+// ---- barn shell: plank side walls (behind the crowd), gable roof & rafters ----
+// (physics uses ARENA bounds, not these meshes — walls are purely the barn we play inside)
+const plankMat = new THREE.MeshLambertMaterial({ map: barnPlankTex, side:THREE.DoubleSide });
+const beamMat  = new THREE.MeshLambertMaterial({ color:0x3a2817 });
+const SHELL_X = ARENA.halfX + 8, SHELL_Z = ARENA.halfZ + 30, EAVE_H = 42, RIDGE = 60;
+// long plank walls, set back behind the hay-bale boards + crowd
+[1,-1].forEach(side=>{
+  const wl = new THREE.Mesh(new THREE.PlaneGeometry(SHELL_X*2, EAVE_H), plankMat);
+  wl.position.set(0, EAVE_H/2, side*SHELL_Z); wl.rotation.y = side>0?Math.PI:0; scene.add(wl);
+  // hay loft window up high
+  const loft = new THREE.Mesh(new THREE.BoxGeometry(10, 8, 0.6), new THREE.MeshLambertMaterial({color:0x140d07}));
+  loft.position.set(0, EAVE_H-8, side*(SHELL_Z-0.4)); scene.add(loft);
+});
+// gable roof: two long slopes meeting at the ridge (dark underside, seen from inside)
 {
-  const railMat = new THREE.MeshBasicMaterial({ color:0xffb347 });
-  const railS = new THREE.Mesh(new THREE.BoxGeometry(ARENA.halfX*2, 0.5, 0.5), railMat);
-  railS.position.set(0, ARENA.wallH, ARENA.halfZ); scene.add(railS);
-  const railN = railS.clone(); railN.position.z = -ARENA.halfZ; scene.add(railN);
-  const railE = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, ARENA.halfZ*2), railMat);
-  railE.position.set(ARENA.halfX, ARENA.wallH, 0); scene.add(railE);
-  const railW = railE.clone(); railW.position.x = -ARENA.halfX; scene.add(railW);
-  // faint vertical corner posts
-  [[1,1],[1,-1],[-1,1],[-1,-1]].forEach(([sx,sz])=>{
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.4, ARENA.wallH, 0.4),
-      new THREE.MeshBasicMaterial({ color:0xffb347, transparent:true, opacity:0.35 }));
-    post.position.set(sx*ARENA.halfX, ARENA.wallH/2, sz*ARENA.halfZ);
-    scene.add(post);
+  const roofMat = new THREE.MeshLambertMaterial({ color:0x40301f, side:THREE.DoubleSide });
+  const rise = RIDGE - EAVE_H;
+  const slope = Math.hypot(SHELL_Z, rise), tilt = Math.atan2(rise, SHELL_Z);
+  [1,-1].forEach(side=>{
+    const rf = new THREE.Mesh(new THREE.PlaneGeometry(SHELL_X*2, slope), roofMat);
+    rf.position.set(0, (EAVE_H+RIDGE)/2, side*SHELL_Z/2);
+    rf.rotation.x = -Math.PI/2 - side*tilt;
+    scene.add(rf);
   });
+  const ridge = new THREE.Mesh(new THREE.BoxGeometry(SHELL_X*2, 1.4, 1.4), beamMat);
+  ridge.position.set(0, RIDGE, 0); scene.add(ridge);
+  // cross tie-beams + king posts (rafters overhead)
+  for(let x=-SHELL_X+10; x<=SHELL_X-10; x+=20){
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, SHELL_Z*2), beamMat);
+    beam.position.set(x, EAVE_H+1.5, 0); scene.add(beam);
+    const kp = new THREE.Mesh(new THREE.BoxGeometry(0.8, rise, 0.8), beamMat);
+    kp.position.set(x, EAVE_H+rise/2, 0); scene.add(kp);
+  }
 }
 
-// goal boxes (visible frames + netting)
+// the goals ARE the big barn doors at each end — the doorway is the goal mouth
 function buildGoal(sx, color){
   const grp = new THREE.Group();
-  const frameMat = new THREE.MeshLambertMaterial({ color });
-  const post = (w,h,d,x,y,z)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),frameMat); m.position.set(x,y,z); grp.add(m); };
-  post(1.2, ARENA.goalH, 1.2, 0, ARENA.goalH/2,  ARENA.goalHalfW);
-  post(1.2, ARENA.goalH, 1.2, 0, ARENA.goalH/2, -ARENA.goalHalfW);
-  post(1.2, 1.2, ARENA.goalHalfW*2+1.2, 0, ARENA.goalH, 0);
-  // net (semi-transparent box)
-  const net = new THREE.Mesh(
-    new THREE.BoxGeometry(ARENA.goalDepth, ARENA.goalH, ARENA.goalHalfW*2),
-    new THREE.MeshLambertMaterial({ color, transparent:true, opacity:0.14, side:THREE.DoubleSide })
-  );
-  net.position.set(sx*ARENA.goalDepth/2, ARENA.goalH/2, 0);
-  grp.add(net);
+  const trim   = new THREE.MeshLambertMaterial({ color });
+  const timber = new THREE.MeshLambertMaterial({ color:0x4a3320 });
+  const doorMat= new THREE.MeshLambertMaterial({ map: barnPlankTex });
+  const white  = new THREE.MeshLambertMaterial({ color:0xe8e0d0 });
+  const gw=ARENA.goalHalfW, gh=ARENA.goalH, WH=EAVE_H, SZ=SHELL_Z, RID=RIDGE;
+  const box=(w,h,d,mat,x,y,z)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat); m.position.set(x,y,z); grp.add(m); return m; };
+  // red plank end wall wrapping the doorway (thin boxes facing the pitch)
+  const sideW = SZ - gw;
+  box(0.8, WH, sideW, doorMat, 0, WH/2,  gw+sideW/2);
+  box(0.8, WH, sideW, doorMat, 0, WH/2, -(gw+sideW/2));
+  box(0.8, WH-gh, gw*2, doorMat, 0, gh+(WH-gh)/2, 0);           // header panel above doorway
+  // gable peak: stacked shrinking planks climbing to the ridge
+  const peakN=6, rise=RID-WH;
+  for(let i=0;i<peakN;i++){ const f=(i+0.5)/peakN; box(0.8, rise/peakN*1.05, SZ*2*(1-f), doorMat, 0, WH+(i+0.5)*rise/peakN, 0); }
+  // timber doorway frame + team-color header beam
+  [gw,-gw].forEach(z=>{ box(1.4, gh+1.2, 1.4, timber, 0, (gh+1.2)/2, z); });
+  box(1.6, 1.5, gw*2+2.8, trim, 0, gh+0.6, 0);
+  // two barn-door leaves swung wide open (white X-brace + team-color edge)
+  [1,-1].forEach(s=>{
+    const leaf=new THREE.Group();
+    leaf.add(new THREE.Mesh(new THREE.BoxGeometry(0.5, gh, gw*0.95), doorMat));
+    const b1=new THREE.Mesh(new THREE.BoxGeometry(0.6, gh*1.02, 0.7), white); b1.rotation.x=0.9; leaf.add(b1);
+    const b2=new THREE.Mesh(new THREE.BoxGeometry(0.6, gh*1.02, 0.7), white); b2.rotation.x=-0.9; leaf.add(b2);
+    const edge=new THREE.Mesh(new THREE.BoxGeometry(0.55, gh, 0.7), trim); edge.position.z=-s*gw*0.42; leaf.add(edge);
+    leaf.position.set(sx*3.2, gh/2, s*(gw+3.2));
+    leaf.rotation.y = sx*s*0.6;
+    grp.add(leaf);
+  });
+  // dark barn interior behind the doors = goal recess (keeps the goal read clear)
+  const recess=new THREE.Mesh(
+    new THREE.BoxGeometry(ARENA.goalDepth, gh, gw*2),
+    new THREE.MeshLambertMaterial({ color:0x160f08, transparent:true, opacity:0.55, side:THREE.DoubleSide }));
+  recess.position.set(sx*ARENA.goalDepth/2, gh/2, 0); grp.add(recess);
   grp.position.set(sx*ARENA.halfX, 0, 0);
   scene.add(grp);
 }
@@ -681,41 +806,45 @@ let crowdHype = 0, crowdT = 0;
   const plaid = [0xa03030, 0x30702a, 0x2a4a8a, 0xa07030, 0x707070, 0x8a3a8a, 0xc0c0c0];
   const skins = [0xd9a066, 0xc98a5a, 0xe8b880];
 
-  // bleachers + crowd on both long sides
+  // hay-bale boards lining both long sides (these are the "boards")
   [1,-1].forEach(side=>{
-    for(let row=0;row<3;row++){
-      const plank = new THREE.Mesh(new THREE.BoxGeometry(130, 1, 3.4), wood);
-      plank.position.set(0, 2+row*2.6, side*(ARENA.halfZ + 9 + row*4));
-      scene.add(plank);
-      const legL = new THREE.Mesh(new THREE.BoxGeometry(1.4, 2+row*2.6, 1.4), wood);
-      legL.position.set(-60, (2+row*2.6)/2, side*(ARENA.halfZ + 9 + row*4)); scene.add(legL);
-      const legR = legL.clone(); legR.position.x = 60; scene.add(legR);
-    }
-    for(let i=0;i<26;i++){
-      const row = Math.floor(Math.random()*3);
-      const grp = new THREE.Group();
-      const body = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.9, 0.9), new THREE.MeshLambertMaterial({ color: pick(plaid) }));
-      body.position.y = 1.4; grp.add(body);
-      const head = new THREE.Mesh(new THREE.SphereGeometry(0.55, 8, 6), new THREE.MeshLambertMaterial({ color: pick(skins) }));
-      head.position.y = 2.8; grp.add(head);
-      const hat = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.35, 1.0), new THREE.MeshLambertMaterial({ color: Math.random()<0.4?0xcc8822:pick(plaid) }));
-      hat.position.y = 3.2; grp.add(hat);
-      const baseY = 2.5 + row*2.6;
-      grp.position.set(-58 + Math.random()*116, baseY, side*(ARENA.halfZ + 8.6 + row*4));
-      scene.add(grp);
-      crowdFolks.push({ grp, baseY, phase: Math.random()*7 });
+    const z0 = side*(ARENA.halfZ+2.8);
+    for(let x=-ARENA.halfX+2; x<=ARENA.halfX-2; x+=4.8){
+      scene.add(hayBale(x, 2.4, z0, true));
+      if(Math.random()<0.5) scene.add(hayBale(x+(Math.random()-0.5), 7.0, z0, true));   // stacked second row
     }
   });
 
-  // stadium light poles
-  [[-70,-70],[70,-70],[-70,70],[70,70]].forEach(([x,z])=>{
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.8,1.1,36,8), new THREE.MeshLambertMaterial({color:0x555555}));
-    pole.position.set(x*1.35, 18, z); scene.add(pole);
-    const head = new THREE.Mesh(new THREE.BoxGeometry(7,2.5,1.5),
-      new THREE.MeshLambertMaterial({ color:0xfff2c0, emissive:0xffe9a0 }));
-    head.position.set(x*1.35, 36, z);
-    head.lookAt(new THREE.Vector3(0,0,0));
-    scene.add(head);
+  // spectators: hillbillies perched on hay bales + barnyard critters, both sides
+  const critters = ['cow','pig','chicken','goat','chicken','pig','cow'];
+  [1,-1].forEach(side=>{
+    for(let i=0;i<11;i++){
+      const x = -ARENA.halfX+9 + i*((ARENA.halfX*2-18)/10);
+      const z = side*(ARENA.halfZ + 10 + (i%2)*3.5);
+      scene.add(hayBale(x, 2.4, z, true));                    // a bale to sit on
+      const hick = makeHick();
+      const baseY = 4.0;
+      hick.position.set(x, baseY, z);
+      hick.rotation.y = side>0 ? Math.PI : 0;                 // face the pitch
+      scene.add(hick);
+      crowdFolks.push({ grp: hick, baseY, phase: Math.random()*7 });
+    }
+    for(let i=0;i<6;i++){                                     // critters millin' in the back
+      const a = makeAnimal(pick(critters));
+      a.position.set(-ARENA.halfX+14 + Math.random()*(ARENA.halfX*2-28), 0, side*(ARENA.halfZ + 17 + Math.random()*10));
+      a.rotation.y = Math.random()*Math.PI*2;
+      scene.add(a);
+    }
+  });
+
+  // work-lights strung from the rafters
+  [[-42,-24],[42,-24],[-42,24],[42,24]].forEach(([x,z])=>{
+    const cord=new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.06,10,4), new THREE.MeshLambertMaterial({color:0x1a1a1a}));
+    cord.position.set(x,35,z); scene.add(cord);
+    const shade=new THREE.Mesh(new THREE.ConeGeometry(1.7,1.5,12), new THREE.MeshLambertMaterial({color:0x2b2b2b, side:THREE.DoubleSide}));
+    shade.position.set(x,30,z); scene.add(shade);
+    const bulb=new THREE.Mesh(new THREE.SphereGeometry(0.6,8,6), new THREE.MeshBasicMaterial({color:0xffe9a0}));
+    bulb.position.set(x,29.2,z); scene.add(bulb);
   });
 
   // yard junk
@@ -865,65 +994,63 @@ function wheelMesh(r, w){
   m.userData.wheel = true; m.userData.r = r;
   return m;
 }
+// mowing tractor (the "cars") — ride-on mower with a wide cutting deck
+function mowingTractor(g, teamColor){
+  const body  = new THREE.MeshLambertMaterial({ color: teamColor });
+  const steel = new THREE.MeshLambertMaterial({ color: 0x9aa0a6 });
+  const dark  = new THREE.MeshLambertMaterial({ color: 0x241a10 });
+  const trim  = new THREE.MeshLambertMaterial({ color: 0xf4e7b0 });
+  const lampF = new THREE.MeshLambertMaterial({ color:0xfff2b0, emissive:0xffe9a0 });
+  const B=(w,h,d,mat,x,y,z)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat); m.position.set(x,y,z); m.castShadow=true; g.add(m); return m; };
+  B(3.6,0.5,2.6, steel, 0,0.55,2.0);          // wide cutting deck up front
+  B(3.7,0.2,0.3, dark,  0,0.4,3.25);          // deck lip
+  B(2.2,1.3,2.3, body,  0,1.45,1.2);          // hood / engine
+  B(2.25,0.35,2.35, trim, 0,2.0,1.2);         // hood trim stripe
+  B(0.35,0.5,2.0, dark,  1.15,1.5,1.2);       // hood side vents
+  B(0.35,0.5,2.0, dark, -1.15,1.5,1.2);
+  B(2.2,0.8,3.0, body,  0,1.0,-0.7);          // chassis
+  B(1.7,0.3,1.4, dark,  0,1.65,-1.3);         // seat pan
+  B(1.7,1.3,0.35, body, 0,2.3,-1.9);          // seat back
+  B(1.75,0.35,0.4, trim,0,3.0,-1.95);         // seat back trim
+  B(0.18,1.2,0.18, dark,0,1.9,0.2);           // steering column
+  const wheel=new THREE.Mesh(new THREE.CylinderGeometry(0.62,0.62,0.14,12), dark); wheel.position.set(0,2.5,0.42); wheel.rotation.x=1.1; g.add(wheel);
+  B(0.3,1.7,0.3, dark, 0.9,2.2,1.0);          // exhaust stack
+  B(0.5,0.5,0.35, dark, 0.9,3.1,1.0);         // muffler tip
+  B(0.6,0.4,0.15, lampF, 0,1.6,2.62);         // headlight
+  const driver=makeHick(); driver.position.set(0,1.05,-1.5); driver.scale.setScalar(0.82); g.add(driver);  // hillbilly at the wheel
+  [[1.35,1.9],[-1.35,1.9]].forEach(([x,z])=>{ const w=wheelMesh(0.55,0.5); w.position.set(x,0.55,z); g.add(w); });   // small front
+  [[1.5,-1.4],[-1.5,-1.4]].forEach(([x,z])=>{ const w=wheelMesh(1.05,0.85); w.position.set(x,1.05,z); g.add(w); });  // big rear
+}
+
+// a cow with a hick in the saddle (the "big tractors")
+function cowRider(g, teamColor){
+  const hide  = new THREE.MeshLambertMaterial({ map: cowHideTex });
+  const white = new THREE.MeshLambertMaterial({ color:0xf4f0e8 });
+  const pink  = new THREE.MeshLambertMaterial({ color:0xe6a0a0 });
+  const dark  = new THREE.MeshLambertMaterial({ color:0x241a10 });
+  const bone  = new THREE.MeshLambertMaterial({ color:0xe8e0c8 });
+  const blanket = new THREE.MeshLambertMaterial({ color: teamColor });
+  const B=(w,h,d,mat,x,y,z)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat); m.position.set(x,y,z); m.castShadow=true; g.add(m); return m; };
+  B(3.2,2.0,2.0, hide, 0,2.0,-0.2);                    // spotted body
+  B(1.3,1.3,1.1, white, 0,2.3,1.7);                    // head
+  B(0.85,0.7,0.6, pink, 0,2.0,2.45);                   // snout
+  [0.55,-0.55].forEach(x=>{ B(0.5,0.28,0.32, white, x,2.75,1.55); });   // ears
+  [0.45,-0.45].forEach(x=>{ const hn=new THREE.Mesh(new THREE.ConeGeometry(0.16,0.55,6), bone); hn.position.set(x,3.15,1.55); hn.rotation.z=x>0?-0.5:0.5; g.add(hn); });   // horns
+  [[1.05,0.75],[1.05,-0.75],[-1.05,0.75],[-1.05,-0.75]].forEach(([x,z])=>{   // legs (static — she glides, it's arcade)
+    const lg=new THREE.Mesh(new THREE.CylinderGeometry(0.28,0.24,1.6,6), white); lg.position.set(x,0.8,z);
+    const hoof=new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.3,0.35,6), dark); hoof.position.y=-0.85; lg.add(hoof); g.add(lg);
+  });
+  const tail=new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.06,1.8,5), white); tail.position.set(0,2.1,-1.25); tail.rotation.x=-0.55; g.add(tail);
+  const udder=new THREE.Mesh(new THREE.SphereGeometry(0.45,8,6), pink); udder.position.set(0,1.0,-0.5); g.add(udder);
+  B(2.3,0.28,1.9, blanket, 0,3.06,-0.2);               // team saddle blanket
+  const rider=makeHick(); rider.position.set(0,3.0,-0.25); rider.scale.setScalar(0.85); g.add(rider);  // hick astride
+  const reins=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,2.4,4), dark); reins.position.set(0,3.1,0.9); reins.rotation.x=1.15; g.add(reins);
+}
+
 function buildVehicleMesh(typeId, teamColor){
   const g = new THREE.Group();
-  const body = new THREE.MeshLambertMaterial({ color: teamColor });
-  const rust = new THREE.MeshLambertMaterial({ color: 0x7a4a28 });
-  const dark = new THREE.MeshLambertMaterial({ color: 0x332211 });
-  const glass = new THREE.MeshLambertMaterial({ color: 0x99bbcc });
-  const lampF = new THREE.MeshLambertMaterial({ color:0xfff2b0, emissive:0xffe9a0 });
-  const lampR = new THREE.MeshLambertMaterial({ color:0xcc2222, emissive:0x881111 });
-  const B = (w,h,d,mat,x,y,z)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat); m.position.set(x,y,z); m.castShadow=true; g.add(m); return m; };
-
-  if(typeId==='pickup'){
-    B(3.4,1.3,7.0,body, 0,1.15,0);            // base
-    B(3.2,1.2,2.4,body, 0,2.3,0.6);           // cab
-    B(2.8,0.9,2.2,glass,0,2.35,0.7);          // windows
-    B(3.0,0.5,2.6,rust, 0,1.6,-2.0);          // rusty bed
-    B(1.0,1.0,1.0,rust, 0.8,2.1,-2.0);        // hay bale-ish junk
-    B(0.3,2.2,0.3,dark, -1.4,2.9,-3.2);       // exhaust stack
-    B(0.6,0.4,0.15,lampF, 1.2,1.4,3.55); B(0.6,0.4,0.15,lampF, -1.2,1.4,3.55);
-    B(0.5,0.4,0.15,lampR, 1.2,1.4,-3.55); B(0.5,0.4,0.15,lampR, -1.2,1.4,-3.55);
-    B(3.5,0.3,0.4,dark, 0,0.9,3.55);          // front bumper
-    [[1.7,1.9],[-1.7,1.9],[1.7,-2.3],[-1.7,-2.3]].forEach(([x,z])=>{ const w=wheelMesh(1.0,0.8); w.position.set(x,1.0,z); g.add(w); });
-  } else if(typeId==='muscle'){
-    B(3.4,1.0,7.2,body, 0,1.0,0);
-    B(3.0,0.9,3.0,body, 0,1.9,-0.2);
-    B(2.7,0.8,2.6,glass,0,1.95,-0.1);
-    B(2.6,0.4,0.6,dark, 0,2.4,-3.2);          // spoiler
-    B(0.9,0.5,1.4,dark, 0,1.7,2.9);           // hood scoop
-    B(0.6,0.35,0.15,lampF, 1.2,1.1,3.65); B(0.6,0.35,0.15,lampF, -1.2,1.1,3.65);
-    B(2.8,0.3,0.15,lampR, 0,1.1,-3.65);       // full-width taillight, real classy
-    [[1.7,2.3],[-1.7,2.3],[1.7,-2.4],[-1.7,-2.4]].forEach(([x,z])=>{ const w=wheelMesh(0.95,0.8); w.position.set(x,0.95,z); g.add(w); });
-  } else if(typeId==='mower'){
-    B(2.4,0.8,4.6,body, 0,0.9,0.3);
-    B(2.6,0.4,3.0,rust, 0,0.5,0.6);           // deck
-    B(2.0,1.4,0.4,body, 0,2.0,-1.4);          // seat back
-    B(2.0,0.3,1.6,dark, 0,1.4,-1.0);          // seat
-    B(0.2,1.2,0.2,dark, 0.0,2.0,1.6);         // steering column
-    B(1.4,0.15,1.0,dark, 0,2.6,1.5);          // wheel-ish
-    B(0.5,0.35,0.15,lampF, 0,1.2,2.5);        // one headlight. it's a mower.
-    [[1.2,1.6],[-1.2,1.6]].forEach(([x,z])=>{ const w=wheelMesh(0.6,0.5); w.position.set(x,0.6,z); g.add(w); });
-    [[1.3,-1.5],[-1.3,-1.5]].forEach(([x,z])=>{ const w=wheelMesh(0.9,0.7); w.position.set(x,0.9,z); g.add(w); });
-  } else if(typeId==='monster'){
-    B(3.6,1.5,6.4,body, 0,3.0,0);
-    B(3.2,1.3,2.4,body, 0,4.3,0.5);
-    B(2.9,1.0,2.1,glass,0,4.35,0.6);
-    B(0.4,1.6,0.4,dark, 1.2,4.4,-2.6);
-    B(0.4,1.6,0.4,dark, -1.2,4.4,-2.6);       // twin stacks
-    B(0.6,0.4,0.15,lampF, 1.2,3.0,3.25); B(0.6,0.4,0.15,lampF, -1.2,3.0,3.25);
-    B(2.6,0.35,0.4,lampF, 0,5.1,1.0);         // roof light bar, for huntin'... goals
-    B(0.5,0.4,0.15,lampR, 1.2,3.0,-3.25); B(0.5,0.4,0.15,lampR, -1.2,3.0,-3.25);
-    [[2.1,2.1],[-2.1,2.1],[2.1,-2.2],[-2.1,-2.2]].forEach(([x,z])=>{ const w=wheelMesh(1.9,1.3); w.position.set(x,1.9,z); g.add(w); });
-  } else { // tractor
-    B(2.6,2.0,5.2,body, 0,2.0,0.4);
-    B(2.4,1.6,2.0,glass,0,3.6,-1.0);          // cab glass
-    B(0.5,2.4,0.5,dark, 0.9,3.9,1.6);         // smokestack
-    B(2.8,0.6,1.0,rust, 0,1.4,3.0);           // front weight
-    B(0.5,0.4,0.15,lampF, 0.8,2.4,3.05); B(0.5,0.4,0.15,lampF, -0.8,2.4,3.05);
-    [[1.5,2.2],[-1.5,2.2]].forEach(([x,z])=>{ const w=wheelMesh(0.8,0.7); w.position.set(x,0.8,z); g.add(w); });
-    [[1.7,-1.6],[-1.7,-1.6]].forEach(([x,z])=>{ const w=wheelMesh(1.7,1.0); w.position.set(x,1.7,z); g.add(w); });
-  }
+  if(typeId==='monster' || typeId==='tractor') cowRider(g, teamColor);   // the big picks ride cows
+  else mowingTractor(g, teamColor);                                      // the rest are mowing tractors
   return g;
 }
 
@@ -1310,8 +1437,9 @@ function updateBall(dt){
     if(inMouth && ball.pos.x < -(ARENA.halfX + BALL_R*0.8)) return scoreGoal(1);
   }
 
-  // walls
-  const maxX = inMouth ? ARENA.halfX + ARENA.goalDepth - BALL_R : ARENA.halfX - BALL_R;
+  // walls (during the goal celebration, keep the ball in the goal volume so it rolls all the way in)
+  const inGoalVol = inMouth || (game.state==='goal' && Math.abs(ball.pos.z) < ARENA.goalHalfW - BALL_R*0.3);
+  const maxX = inGoalVol ? ARENA.halfX + ARENA.goalDepth - BALL_R : ARENA.halfX - BALL_R;
   if(ball.pos.x >  maxX){ ball.pos.x =  maxX; ball.vel.x = -Math.abs(ball.vel.x)*0.75; }
   if(ball.pos.x < -maxX){ ball.pos.x = -maxX; ball.vel.x =  Math.abs(ball.vel.x)*0.75; }
   const insideGoalX = Math.abs(ball.pos.x) > ARENA.halfX - BALL_R*0.5;
@@ -1537,7 +1665,8 @@ function scoreGoal(team){
   // fireworks + hype
   burst(ball.pos, TEAM_COLOR[team]===TEAM_COLOR[0] ? 0x4fa3ff : 0xff6a4f, 70, 26);
   camShake = 1.2; crowdHype = 1;
-  ball.vel.set(0,26,0);
+  const gx = team===0 ? 1 : -1;              // shove the ball on into the barn so ya see it roll all the way in
+  ball.vel.set(gx*42, 7, ball.vel.z*0.35);
   game.state='goal'; game.goalT = 3.2;
   if(game.overtime){
     setTimeout(()=>endMatch(), 1800);
