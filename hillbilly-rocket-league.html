@@ -1,6 +1,14 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-14 iter 8 — per-pick vehicle variety, per user request]
+- Each of the 5 lobby picks now reads distinct (typeId passed into the builders):
+  - Deere John (pickup): classic garden tractor + rear toolbox + little smokestack.
+  - Turbo Trimmer (muscle): hood scoop, twin side stacks, rear wing, race roundel (no base exhaust).
+  - Grass Assassin (mower): zero-turn lap bars (no wheel), extra-wide deck + extra blade, skull emblem.
+  - Big Bessie (monster): dairy heifer — udder + cowbell, small horns.
+  - Sir Loin (tractor): longhorn bull — wide horns, brass nose ring, shoulder hump, heavy brow, no udder.
+- Verified: node --check + smoke harness pass; all 5 inspected in a showroom in-browser.
 [2026-07-14 iter 7 — AAA-ward vehicle models, per user request]
 - New shared vehicle textures (built once): clear-coat team paint (sheen + panel lines + rivets),
   chrome (reflection bands), tire tread, brushed steel, denim; upgraded Holstein cow hide (bold spots).
@@ -1098,8 +1106,8 @@ function makeRider(teamColor){
   B(1.06,0.13,1.06, new THREE.MeshLambertMaterial({color:0x5a3a1a}), 0,3.0,0);  // hat band
   return grp;
 }
-// mowing tractor (the "cars") — detailed ride-on mower
-function mowingTractor(g, teamColor){
+// mowing tractor (the "cars") — detailed ride-on mower; per-pick flavor via typeId
+function mowingTractor(g, teamColor, typeId){
   const paint  = new THREE.MeshLambertMaterial({ map: paintTex(teamColor) });
   const paintDk= new THREE.MeshLambertMaterial({ color: shade(teamColor, 0.62) });
   const dark   = new THREE.MeshLambertMaterial({ color: 0x201a12 });
@@ -1118,11 +1126,15 @@ function mowingTractor(g, teamColor){
   C(0.26,0.26,0.1, chromeMat, 0,2.15,2.42, Math.PI/2,0,0, 14);
   // rear fenders over the big wheels
   [1,-1].forEach(sx=>{ B(0.78,0.16,2.2, paint, sx*1.5,2.34,-1.4, -0.12,0,0); B(0.16,0.72,2.2, paint, sx*1.86,1.95,-1.4); });
-  // dash + steering column + wheel
+  // dash + steering (wheel for most; zero-turn lap bars for the Grass Assassin)
   B(1.5,0.5,0.5, dark, 0,2.05,0.15);
-  C(0.08,0.08,1.0, chromeMat, 0,2.4,0.35, -0.55,0,0, 8);
-  C(0.5,0.5,0.09, dark, 0,2.78,0.72, -0.55,0,0, 20);
-  C(0.15,0.15,0.12, chromeMat, 0,2.8,0.68, -0.55,0,0, 12);
+  if(typeId==='mower'){
+    [1,-1].forEach(sx=>{ C(0.055,0.055,1.2, dark, sx*0.5,2.5,0.4, -0.42,0,0, 6); C(0.11,0.11,0.16, chromeMat, sx*0.5,3.0,0.02, Math.PI/2,0,0, 8); });
+  } else {
+    C(0.08,0.08,1.0, chromeMat, 0,2.4,0.35, -0.55,0,0, 8);
+    C(0.5,0.5,0.09, dark, 0,2.78,0.72, -0.55,0,0, 20);
+    C(0.15,0.15,0.12, chromeMat, 0,2.8,0.68, -0.55,0,0, 12);
+  }
   // contoured seat
   B(1.45,0.35,1.25, seatMat, 0,1.8,-1.35);
   B(1.45,1.5,0.4, seatMat, 0,2.6,-1.95);
@@ -1135,14 +1147,32 @@ function mowingTractor(g, teamColor){
   B(3.62,0.16,0.4, dark, 0,0.34,3.35);
   [-0.9,0.9].forEach(bx=> C(0.82,0.82,0.06, dark, bx,0.32,2.15, 0,0,0, 14));
   B(1.0,0.5,0.9, steelMat, 1.95,0.62,1.5);                   // discharge chute
-  // chrome exhaust
-  C(0.15,0.15,1.5, chromeMat, 0.95,2.45,0.85, 0,0,0, 10);
-  C(0.23,0.23,0.5, chromeMat, 0.95,3.25,0.85, 0,0,0, 10);
+  // chrome exhaust (muscle gets its own twin stacks below)
+  if(typeId!=='muscle'){
+    C(0.15,0.15,1.5, chromeMat, 0.95,2.45,0.85, 0,0,0, 10);
+    C(0.23,0.23,0.5, chromeMat, 0.95,3.25,0.85, 0,0,0, 10);
+  }
   // head/tail lights
   [0.7,-0.7].forEach(hx=>{ C(0.22,0.22,0.14, chromeMat, hx,1.8,2.42, Math.PI/2,0,0,12); C(0.15,0.15,0.08, lens, hx,1.8,2.5, Math.PI/2,0,0,12); });
   [0.6,-0.6].forEach(tx=> B(0.28,0.2,0.1, tailL, tx,1.7,-1.78));
   // front chrome guard
   C(0.1,0.1,2.0, chromeMat, 0,0.72,2.75, 0,0,Math.PI/2, 10);
+  // ---- per-pick flavor so each ride reads distinct ----
+  if(typeId==='muscle'){                                     // Turbo Trimmer — souped-up zero-turn
+    B(0.95,0.4,1.1, dark, 0,2.45,1.35); B(0.72,0.32,0.55, chromeMat, 0,2.72,1.35);           // hood scoop
+    [1,-1].forEach(sx=> C(0.12,0.15,1.5, chromeMat, sx*1.22,2.15,0.4, 0.35,0,sx*0.16, 10));   // twin side stacks
+    [1,-1].forEach(sx=> C(0.07,0.07,0.9, chromeMat, sx*0.95,3.1,-2.7, 0,0,0, 8));             // wing uprights
+    B(2.5,0.12,0.65, paint, 0,3.6,-2.75);                                                     // rear wing
+    C(0.36,0.36,0.06, new THREE.MeshLambertMaterial({color:0xf4f4ec}), 0,2.12,2.46, Math.PI/2,0,0, 16); // race roundel
+  } else if(typeId==='mower'){                               // Grass Assassin — mean mulcher
+    B(4.1,0.5,0.55, steelMat, 0,0.5,3.05);                                                    // extra-wide deck lip
+    C(0.85,0.85,0.06, dark, 0,0.32,2.85, 0,0,0, 14);                                           // extra blade
+    const bonez=new THREE.MeshLambertMaterial({color:0xeae6dc});
+    C(0.3,0.3,0.06, bonez, 0,2.12,2.46, Math.PI/2,0,0, 12); B(0.34,0.26,0.12, bonez, 0,1.74,2.5); // skull emblem
+  } else {                                                   // Deere John — classic garden tractor
+    B(1.2,0.6,0.7, dark, 0,1.95,-2.45);                                                        // rear toolbox
+    C(0.13,0.13,0.95, chromeMat, -0.8,2.35,-0.5, 0,0,0, 8);                                    // little smokestack
+  }
   // driver
   const driver=makeRider(teamColor); driver.position.set(0,1.15,-1.2); driver.scale.setScalar(0.8); g.add(driver);
   // wheels: small front, big rear
@@ -1150,8 +1180,9 @@ function mowingTractor(g, teamColor){
   [[1.55,-1.45],[-1.55,-1.45]].forEach(([x,z])=>{ const w=wheelMesh(1.15,0.95); w.position.set(x,1.15,z); g.add(w); });
 }
 
-// a cow with a hick in the saddle (the "big tractors") — detailed, sphere-based
-function cowRider(g, teamColor){
+// a cow with a hick in the saddle (the "big tractors") — detailed; heifer vs bull via typeId
+function cowRider(g, teamColor, typeId){
+  const bull  = (typeId==='tractor');   // Sir Loin is a longhorn bull; Big Bessie is a heifer
   const hide  = new THREE.MeshLambertMaterial({ map: cowHideTex });
   const white = new THREE.MeshLambertMaterial({ color:0xf6f2ea });
   const pink  = new THREE.MeshLambertMaterial({ color:0xe7a3a3 });
@@ -1169,14 +1200,21 @@ function cowRider(g, teamColor){
   S(1.35, hide, 0,2.0,-0.2, 1.5,1.05,1.05);
   S(1.15, hide, 0,2.05,1.0, 1.1,1.05,1.05);            // chest
   S(1.22, hide, 0,2.0,-1.45, 1.0,1.12,1.05);           // rump
+  if(bull) S(0.82, hide, 0,2.95,1.15, 1.15,1.0,1.05);  // muscular shoulder hump
   // neck + head + face
   C(0.72,0.55,1.15, white, 0,2.45,1.75, 0.95,0,0, 12); // neck
   S(0.75, white, 0,2.75,2.45, 1,1.05,1.15);            // head
   S(0.55, pink, 0,2.42,3.1, 1,0.85,0.8);               // muzzle
   [0.2,-0.2].forEach(x=> S(0.08, dark, x,2.32,3.5, 1,1,1, 6));           // nostrils
   [0.32,-0.32].forEach(x=>{ S(0.17, white, x,3.0,2.95, 1,1,1, 8); S(0.09, eye, x*1.05,3.02,3.08, 1,1,1, 6); });  // eyes
+  if(bull) [0.34,-0.34].forEach(x=> B(0.34,0.12,0.28, dark, x,3.2,3.0, 0.2,0,0));  // heavy angry brow
   [0.64,-0.64].forEach(x=> B(0.46,0.24,0.32, white, x,3.1,2.6, 0,0, x>0?-0.5:0.5));   // ears
-  [0.42,-0.42].forEach(x=> C(0.03,0.17,0.7, bone, x,3.4,2.55, 0,0, x>0?-0.6:0.6, 8)); // horns
+  if(bull){
+    [0.4,-0.4].forEach(x=> C(0.04,0.16,1.7, bone, x,3.3,2.5, 0,0, x>0?-1.15:1.15, 8)); // longhorns
+    C(0.13,0.16,0.09, brass, 0,2.28,3.5, Math.PI/2,0,0, 12);                            // brass nose ring
+  } else {
+    [0.42,-0.42].forEach(x=> C(0.03,0.17,0.7, bone, x,3.4,2.55, 0,0, x>0?-0.6:0.6, 8)); // heifer horns
+  }
   S(0.32, brown, 0,3.4,2.7, 1,0.8,0.7, 8);             // forelock
   // legs (upper + lower + hoof)
   [[1.0,1.15],[1.0,-1.2],[-1.0,1.15],[-1.0,-1.2]].forEach(([x,z])=>{
@@ -1186,10 +1224,11 @@ function cowRider(g, teamColor){
   });
   C(0.1,0.05,1.8, white, 0,2.1,-1.9, -0.45,0,0, 6);    // tail
   S(0.24, brown, 0,1.35,-2.6, 1,1,1, 8);               // tail tuft
-  S(0.5, pink, 0,1.1,-0.5, 1.2,0.9,1, 10);             // udder
-  // cowbell on a collar
-  C(0.62,0.62,0.14, dark, 0,2.05,2.15, Math.PI/2,0,0, 14);
-  B(0.32,0.4,0.28, brass, 0,1.6,2.4); S(0.07, brass, 0,1.38,2.42, 1,1,1, 6);
+  if(!bull){                                            // heifer: udder + dairy cowbell
+    S(0.5, pink, 0,1.1,-0.5, 1.2,0.9,1, 10);
+    C(0.62,0.62,0.14, dark, 0,2.05,2.15, Math.PI/2,0,0, 14);
+    B(0.32,0.4,0.28, brass, 0,1.6,2.4); S(0.07, brass, 0,1.38,2.42, 1,1,1, 6);
+  }
   // Western saddle (team colors)
   B(1.75,0.3,1.95, blanket, 0,3.05,-0.2);              // blanket
   B(1.35,0.45,1.55, leather, 0,3.35,-0.2);             // seat
@@ -1203,8 +1242,8 @@ function cowRider(g, teamColor){
 
 function buildVehicleMesh(typeId, teamColor){
   const g = new THREE.Group();
-  if(typeId==='monster' || typeId==='tractor') cowRider(g, teamColor);   // the big picks ride cows
-  else mowingTractor(g, teamColor);                                      // the rest are mowing tractors
+  if(typeId==='monster' || typeId==='tractor') cowRider(g, teamColor, typeId);   // the big picks ride cows
+  else mowingTractor(g, teamColor, typeId);                                      // the rest are mowing tractors
   return g;
 }
 
