@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-14 iter 12 — animated, cartoonier cows, per user request]
+- Cows rebuilt with an animation rig: rig group (bounding hop + body pitch) over a body group
+  (squash-and-stretch), with legs on hip pivots that gallop (front/back pairs out of phase) and a
+  swishing tail pivot. Driven by vehicle speed (idle sway -> full gallop) via animateCow in updateCar.
+- Cartoonier styling: bigger head, big eyes with pupils + highlight sparkle, rounder snout, floppier ears.
+- Verified: node --check + smoke harness pass; gallop pose + face inspected in-browser.
 [2026-07-14 iter 11 — effects polish, per user request]
 - New additive glow-particle pool (150) for flames/sparks/firework glints (spawnGlow/updateGlow).
 - Boost flames rebuilt: layered glowing embers (hot-white/orange/gold) + dark smoke, buoyant plume.
@@ -1302,60 +1308,81 @@ function mowingTractor(g, teamColor, typeId){
 function cowRider(g, teamColor, typeId){
   const bull  = (typeId==='tractor');   // Sir Loin is a longhorn bull; Big Bessie is a heifer
   const hide  = new THREE.MeshLambertMaterial({ map: cowHideTex });
-  const white = new THREE.MeshLambertMaterial({ color:0xf6f2ea });
-  const pink  = new THREE.MeshLambertMaterial({ color:0xe7a3a3 });
+  const white = new THREE.MeshLambertMaterial({ color:0xf7f3ec });
+  const pink  = new THREE.MeshLambertMaterial({ color:0xef9ea6 });
   const dark  = new THREE.MeshLambertMaterial({ color:0x201a12 });
   const bone  = new THREE.MeshLambertMaterial({ color:0xece3c8 });
-  const eye   = new THREE.MeshLambertMaterial({ color:0x181310 });
+  const eye   = new THREE.MeshLambertMaterial({ color:0x161009 });
+  const eyeW  = new THREE.MeshLambertMaterial({ color:0xffffff });
   const brown = new THREE.MeshLambertMaterial({ color:0x6a4a2a });
   const leather = new THREE.MeshLambertMaterial({ color: shade(teamColor,0.55) });
   const blanket = new THREE.MeshLambertMaterial({ color: teamColor });
   const brass = new THREE.MeshLambertMaterial({ color:0xc9a13a, emissive:0x3a2c08 });
-  const B=(w,h,d,mat,x,y,z,rx,ry,rz)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat); m.position.set(x,y,z); if(rx)m.rotation.x=rx; if(ry)m.rotation.y=ry; if(rz)m.rotation.z=rz; m.castShadow=true; g.add(m); return m; };
-  const C=(r1,r2,h,mat,x,y,z,rx,ry,rz,seg)=>{ const m=new THREE.Mesh(new THREE.CylinderGeometry(r1,r2,h,seg||10),mat); m.position.set(x,y,z); if(rx)m.rotation.x=rx; if(ry)m.rotation.y=ry; if(rz)m.rotation.z=rz; m.castShadow=true; g.add(m); return m; };
-  const S=(r,mat,x,y,z,sx,sy,sz,seg)=>{ const m=new THREE.Mesh(new THREE.SphereGeometry(r,seg||14,seg||12),mat); m.position.set(x,y,z); if(sx)m.scale.set(sx,sy,sz); m.castShadow=true; g.add(m); return m; };
-  // rounded barrel body
-  S(1.35, hide, 0,2.0,-0.2, 1.5,1.05,1.05);
-  S(1.15, hide, 0,2.05,1.0, 1.1,1.05,1.05);            // chest
-  S(1.22, hide, 0,2.0,-1.45, 1.0,1.12,1.05);           // rump
-  if(bull) S(0.82, hide, 0,2.95,1.15, 1.15,1.0,1.05);  // muscular shoulder hump
-  // neck + head + face
-  C(0.72,0.55,1.15, white, 0,2.45,1.75, 0.95,0,0, 12); // neck
-  S(0.75, white, 0,2.75,2.45, 1,1.05,1.15);            // head
-  S(0.55, pink, 0,2.42,3.1, 1,0.85,0.8);               // muzzle
-  [0.2,-0.2].forEach(x=> S(0.08, dark, x,2.32,3.5, 1,1,1, 6));           // nostrils
-  [0.32,-0.32].forEach(x=>{ S(0.17, white, x,3.0,2.95, 1,1,1, 8); S(0.09, eye, x*1.05,3.02,3.08, 1,1,1, 6); });  // eyes
-  if(bull) [0.34,-0.34].forEach(x=> B(0.34,0.12,0.28, dark, x,3.2,3.0, 0.2,0,0));  // heavy angry brow
-  [0.64,-0.64].forEach(x=> B(0.46,0.24,0.32, white, x,3.1,2.6, 0,0, x>0?-0.5:0.5));   // ears
+  // rig = whole animal (hop + pitch); body = everything but the legs (squash/stretch)
+  const rig = new THREE.Group(); g.add(rig);
+  const body = new THREE.Group(); rig.add(body);
+  const B=(w,h,d,mat,x,y,z,rx,ry,rz)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat); m.position.set(x,y,z); if(rx)m.rotation.x=rx; if(ry)m.rotation.y=ry; if(rz)m.rotation.z=rz; m.castShadow=true; body.add(m); return m; };
+  const C=(r1,r2,h,mat,x,y,z,rx,ry,rz,seg)=>{ const m=new THREE.Mesh(new THREE.CylinderGeometry(r1,r2,h,seg||10),mat); m.position.set(x,y,z); if(rx)m.rotation.x=rx; if(ry)m.rotation.y=ry; if(rz)m.rotation.z=rz; m.castShadow=true; body.add(m); return m; };
+  const S=(r,mat,x,y,z,sx,sy,sz,seg)=>{ const m=new THREE.Mesh(new THREE.SphereGeometry(r,seg||14,seg||12),mat); m.position.set(x,y,z); if(sx)m.scale.set(sx,sy,sz); m.castShadow=true; body.add(m); return m; };
+  // chunky rounded barrel body
+  S(1.4, hide, 0,2.05,-0.2, 1.5,1.1,1.12);
+  S(1.2, hide, 0,2.1,1.0, 1.12,1.1,1.12);              // chest
+  S(1.28, hide, 0,2.05,-1.5, 1.05,1.18,1.12);          // rump
+  if(bull) S(0.86, hide, 0,3.05,1.15, 1.15,1.0,1.05);  // muscular shoulder hump
+  C(0.78,0.6,1.15, white, 0,2.55,1.8, 0.95,0,0, 12);   // neck
+  // big cartoon head + face
+  S(0.85, white, 0,2.9,2.55, 1,1.05,1.12);             // head
+  S(0.62, pink, 0,2.5,3.25, 1.05,0.85,0.8);            // rounded snout
+  [0.24,-0.24].forEach(x=> S(0.09, dark, x,2.4,3.72, 1,1,1, 6));         // nostrils
+  [0.36,-0.36].forEach(x=>{ S(0.22, eyeW, x,3.12,3.02, 1,1.15,1, 10); S(0.12, eye, x*1.02,3.14,3.2, 1,1,1, 8); S(0.05, eyeW, x*1.02+0.06,3.22,3.3, 1,1,1, 6); }); // big eyes + highlight
+  if(bull) [0.36,-0.36].forEach(x=> B(0.4,0.13,0.3, dark, x,3.36,3.06, 0.25,0,0));  // angry brow
+  [0.74,-0.74].forEach(x=> B(0.52,0.22,0.44, white, x,3.16,2.62, 0.3,0, x>0?-0.7:0.7));  // floppy ears
   if(bull){
-    [0.4,-0.4].forEach(x=> C(0.04,0.16,1.7, bone, x,3.3,2.5, 0,0, x>0?-1.15:1.15, 8)); // longhorns
-    C(0.13,0.16,0.09, brass, 0,2.28,3.5, Math.PI/2,0,0, 12);                            // brass nose ring
+    [0.44,-0.44].forEach(x=> C(0.05,0.17,1.8, bone, x,3.4,2.55, 0,0, x>0?-1.15:1.15, 8)); // longhorns
+    C(0.14,0.17,0.1, brass, 0,2.36,3.62, Math.PI/2,0,0, 12);                               // nose ring
   } else {
-    [0.42,-0.42].forEach(x=> C(0.03,0.17,0.7, bone, x,3.4,2.55, 0,0, x>0?-0.6:0.6, 8)); // heifer horns
+    [0.44,-0.44].forEach(x=> C(0.04,0.18,0.75, bone, x,3.5,2.6, 0,0, x>0?-0.6:0.6, 8));    // heifer horns
   }
-  S(0.32, brown, 0,3.4,2.7, 1,0.8,0.7, 8);             // forelock
-  // legs (upper + lower + hoof)
-  [[1.0,1.15],[1.0,-1.2],[-1.0,1.15],[-1.0,-1.2]].forEach(([x,z])=>{
-    C(0.3,0.24,0.95, white, x,1.35,z, 0,0,0, 8);
-    C(0.22,0.2,0.85, white, x*1.02,0.55,z, 0,0,0, 8);
-    C(0.3,0.32,0.3, dark, x*1.02,0.15,z, 0,0,0, 8);
-  });
-  C(0.1,0.05,1.8, white, 0,2.1,-1.9, -0.45,0,0, 6);    // tail
-  S(0.24, brown, 0,1.35,-2.6, 1,1,1, 8);               // tail tuft
+  S(0.34, brown, 0,3.5,2.75, 1,0.85,0.72, 8);          // forelock
+  // tail on a swishable pivot
+  const tailPivot=new THREE.Group(); tailPivot.position.set(0,2.55,-2.05); body.add(tailPivot);
+  { const t=new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.05,1.9,6), white); t.position.y=-0.9; t.castShadow=true; tailPivot.add(t);
+    const tf=new THREE.Mesh(new THREE.SphereGeometry(0.26,8,8), brown); tf.position.y=-1.85; tailPivot.add(tf); }
   if(!bull){                                            // heifer: udder + dairy cowbell
-    S(0.5, pink, 0,1.1,-0.5, 1.2,0.9,1, 10);
-    C(0.62,0.62,0.14, dark, 0,2.05,2.15, Math.PI/2,0,0, 14);
-    B(0.32,0.4,0.28, brass, 0,1.6,2.4); S(0.07, brass, 0,1.38,2.42, 1,1,1, 6);
+    S(0.52, pink, 0,1.15,-0.5, 1.2,0.9,1, 10);
+    C(0.64,0.64,0.14, dark, 0,2.1,2.2, Math.PI/2,0,0, 14);
+    B(0.34,0.42,0.3, brass, 0,1.62,2.45); S(0.07, brass, 0,1.38,2.47, 1,1,1, 6);
   }
-  // Western saddle (team colors)
-  B(1.75,0.3,1.95, blanket, 0,3.05,-0.2);              // blanket
-  B(1.35,0.45,1.55, leather, 0,3.35,-0.2);             // seat
-  C(0.14,0.16,0.45, leather, 0,3.75,0.42, 0,0,0, 10);  // horn
-  C(0.2,0.2,0.12, leather, 0,3.98,0.42, Math.PI/2,0,0, 10);
-  [0.9,-0.9].forEach(x=>{ B(0.12,0.75,0.4, leather, x,2.95,-0.2); C(0.16,0.16,0.1, chromeMat, x,2.52,-0.2, 0,0,Math.PI/2, 10); }); // stirrups
-  // rider astride + reins to the muzzle
-  const rider=makeRider(teamColor); rider.position.set(0,3.4,-0.2); rider.scale.setScalar(0.82); g.add(rider);
-  [0.45,-0.45].forEach(x=> C(0.035,0.035,2.2, dark, x,3.3,1.5, 0.8,0,0, 5));
+  // Western saddle (team colors) + rider — bob with the body
+  B(1.8,0.3,2.0, blanket, 0,3.2,-0.2);
+  B(1.4,0.45,1.6, leather, 0,3.5,-0.2);
+  C(0.14,0.16,0.45, leather, 0,3.9,0.45, 0,0,0, 10);
+  C(0.2,0.2,0.12, leather, 0,4.13,0.45, Math.PI/2,0,0, 10);
+  [0.92,-0.92].forEach(x=>{ B(0.12,0.75,0.4, leather, x,3.05,-0.2); C(0.16,0.16,0.1, chromeMat, x,2.62,-0.2, 0,0,Math.PI/2, 10); });
+  const rider=makeRider(teamColor); rider.position.set(0,3.55,-0.2); rider.scale.setScalar(0.82); body.add(rider);
+  [0.45,-0.45].forEach(x=> C(0.035,0.035,2.3, dark, x,3.45,1.55, 0.8,0,0, 5));
+  // legs on hip pivots (in the rig, so they swing + don't squash)
+  const legs=[];
+  [[1.0,1.2,'F'],[1.0,-1.25,'B'],[-1.0,1.2,'F'],[-1.0,-1.25,'B']].forEach(([x,z,fb])=>{
+    const hip=new THREE.Group(); hip.position.set(x,1.9,z); rig.add(hip);
+    const up=new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.24,0.95,8), white); up.position.y=-0.5; up.castShadow=true; hip.add(up);
+    const lo=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.2,0.85,8), white); lo.position.y=-1.28; lo.castShadow=true; hip.add(lo);
+    const hf=new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.32,0.3,8), dark); hf.position.y=-1.75; hip.add(hf);
+    legs.push({ hip, fb });
+  });
+  g.userData.anim = { kind:'cow', rig, body, legs, tail:tailPivot, t:Math.random()*6 };
+}
+// gallop/bound + squash-stretch, driven by the vehicle's speed
+function animateCow(a, c, dt){
+  const spd = Math.hypot(c.vel.x, c.vel.z), gait = Math.min(1, spd/38), ground = c.onGround ? 1 : 0.35;
+  a.t += dt * (2.5 + gait*15);
+  const t = a.t, b = Math.sin(t);
+  a.rig.position.y = Math.max(0, b) * (0.05 + gait*1.05) * ground;                // bounding hop
+  a.rig.rotation.x = Math.sin(t-0.5) * (0.02 + gait*0.28) * ground;               // body pitch
+  const dip = Math.max(0, -b) * (0.03 + 0.13*gait) * ground;                      // squash at the bottom
+  a.body.scale.set(1+dip*0.6, 1-dip, 1+dip*0.6);
+  for(const L of a.legs){ const ph = L.fb==='F' ? t+0.5 : t-0.6; L.hip.rotation.x = Math.sin(ph) * (0.05 + gait*0.85); }  // gallop
+  a.tail.rotation.z = Math.sin(t*0.8)*0.35; a.tail.rotation.x = 0.2 + Math.sin(t*0.6)*0.15;   // swish
 }
 
 function buildVehicleMesh(typeId, teamColor){
@@ -1738,6 +1765,8 @@ function updateCar(c, dt, input){
   } else if(!c.onGround){
     c.mesh.rotateX(-0.15);
   }
+  const anim = c.mesh.userData.anim;
+  if(anim && anim.kind==='cow') animateCow(anim, c, dt);
   c.tag.position.set(c.pos.x, c.pos.y + 7.5*c.veh.scale, c.pos.z);
 }
 
