@@ -1,6 +1,14 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-14 iter 11 — effects polish, per user request]
+- New additive glow-particle pool (150) for flames/sparks/firework glints (spawnGlow/updateGlow).
+- Boost flames rebuilt: layered glowing embers (hot-white/orange/gold) + dark smoke, buoyant plume.
+- Tire kickup: mud & grass flung from the rear wheels when driving fast.
+- Landing dust is now an outward-spreading ring that scales with impact (lower trigger threshold).
+- Ball impact spawns a hay/dust puff at the contact point, plus sparks on big wallops.
+- Goal fireworks: central pop + 4 scattered airborne bursts with glowing sparks.
+- Particle pool 260 -> 320. Verified: node --check + smoke harness pass; effects inspected in-browser.
 [2026-07-14 iter 10 — atmosphere + field detailing, per user request]
 - Warm god-ray light shafts (additive open cones) descend from each rafter work-light and pool on the floor.
 - 80 drifting dust motes (additive sprites) float and rise through the barn air (updateDust in the loop).
@@ -1045,7 +1053,7 @@ function addPad(x, z, big){
 [[-40,0],[40,0],[-20,-25],[-20,25],[20,-25],[20,25],[0,0],[-60,0],[60,0],[-40,-38],[-40,38],[40,-38],[40,38]].forEach(([x,z])=>addPad(x,z,false));
 
 // ---------------- PARTICLES ----------------
-const POOL = 260, partPool = [];
+const POOL = 320, partPool = [];
 for(let i=0;i<POOL;i++){
   const m = new THREE.Mesh(new THREE.BoxGeometry(0.7,0.7,0.7),
     new THREE.MeshBasicMaterial({ transparent:true, opacity:1, depthWrite:false }));
@@ -1084,6 +1092,42 @@ function burst(pos, color, n, speed){
   }
 }
 let camShake = 0;
+
+// ---------------- GLOW PARTICLES (flames, sparks, firework glints — additive) ----------------
+const glowTex = makeCanvasTex(32,32,(g,w,h)=>{
+  const gr=g.createRadialGradient(w/2,h/2,0,w/2,h/2,w/2);
+  gr.addColorStop(0,'rgba(255,255,255,1)'); gr.addColorStop(0.4,'rgba(255,230,170,0.85)'); gr.addColorStop(1,'rgba(255,190,90,0)');
+  g.fillStyle=gr; g.fillRect(0,0,w,h);
+});
+const glowGeo = new THREE.BoxGeometry(1,1,1);
+const GLOW=150, glowPool=[]; let glowIdx=0;
+for(let i=0;i<GLOW;i++){
+  const m=new THREE.Mesh(glowGeo, new THREE.MeshBasicMaterial({ map:glowTex, transparent:true, opacity:1, depthWrite:false, blending:THREE.AdditiveBlending }));
+  m.visible=false; scene.add(m);
+  glowPool.push({ m, vel:new THREE.Vector3(), life:0, max:1, size:1, grav:-16 });
+}
+function spawnGlow(x,y,z, vx,vy,vz, color, life, size, grav){
+  const p=glowPool[glowIdx=(glowIdx+1)%GLOW];
+  p.m.visible=true; p.m.position.set(x,y,z);
+  p.m.material.color.setHex(color); p.m.material.opacity=1;
+  p.size=size; p.m.scale.setScalar(size);
+  p.m.rotation.set(Math.random()*3, Math.random()*3, Math.random()*3);
+  p.vel.set(vx,vy,vz); p.life=life; p.max=life; p.grav=(grav===undefined?-16:grav);
+}
+function updateGlow(dt){
+  for(const p of glowPool){
+    if(p.life<=0) continue;
+    p.life-=dt;
+    if(p.life<=0){ p.m.visible=false; continue; }
+    p.m.position.addScaledVector(p.vel, dt);
+    p.vel.y += p.grav*dt;
+    p.vel.multiplyScalar(1-2.4*dt);
+    const t=p.life/p.max;
+    p.m.material.opacity = Math.min(1, t*1.5);
+    p.m.scale.setScalar(p.size*(0.5+0.5*t));
+    p.m.rotation.z += dt*2;
+  }
+}
 
 // ---------------- VEHICLE MESHES ----------------
 // ---- shared vehicle textures + materials (built once, reused across all vehicles) ----
@@ -1607,10 +1651,13 @@ function updateCar(c, dt, input){
 
   // ground
   if(c.pos.y <= 0){
-    if(c.vel.y < -20){
-      thump(1);
-      for(let k=0;k<8;k++) spawnPart(c.pos.x+(Math.random()-0.5)*3, 0.4, c.pos.z+(Math.random()-0.5)*3,
-        (Math.random()-0.5)*8, 2+Math.random()*3, (Math.random()-0.5)*8, 0x8a6a42, 0.5, 0.9);
+    if(c.vel.y < -14){
+      thump(Math.min(1, -c.vel.y/30));
+      const n = 12 + Math.min(20, (-c.vel.y/3)|0);   // dust ring spreads outward, bigger on harder landings
+      for(let k=0;k<n;k++){ const a=Math.random()*Math.PI*2, r=1+Math.random()*3.5;
+        spawnPart(c.pos.x+Math.cos(a)*r, 0.3, c.pos.z+Math.sin(a)*r,
+          Math.cos(a)*(4+Math.random()*7), 1+Math.random()*3, Math.sin(a)*(4+Math.random()*7),
+          Math.random()<0.7?0x9a7a52:0x6a4a28, 0.5+Math.random()*0.35, 0.7+Math.random()*0.6); }
     }
     c.pos.y = 0; c.vel.y = 0;
     if(!c.onGround){ c.onGround = true; c.jumps = 2; c.flip = 0; }
@@ -1647,6 +1694,16 @@ function updateCar(c, dt, input){
     const fs = c.vel.dot(carForward(c));
     for(const w of c.wheels) w.rotation.x += fs*dt / (w.userData.r || 1);
   }
+  // tire kickup — mud & grass flung from the rear when movin' fast
+  const kspd = Math.hypot(c.vel.x, c.vel.z);
+  if(c.onGround && kspd > 20 && Math.random() < 0.7){
+    const fwd = carForward(c);
+    const rx = c.pos.x - fwd.x*2.2*c.veh.scale, rz = c.pos.z - fwd.z*2.2*c.veh.scale;
+    const side = Math.random()<0.5 ? 1 : -1;
+    spawnPart(rx - fwd.z*side*1.3*c.veh.scale, 0.3, rz + fwd.x*side*1.3*c.veh.scale,
+      -fwd.x*(4+Math.random()*7)+(Math.random()-0.5)*3, 3+Math.random()*5, -fwd.z*(4+Math.random()*7)+(Math.random()-0.5)*3,
+      Math.random()<0.6 ? 0x5a3f22 : 0x3f6a26, 0.45+Math.random()*0.3, 0.45+Math.random()*0.45);
+  }
   // exhaust puffs
   if(c.onGround && input.throttle > 0){
     c.smokeT -= dt;
@@ -1658,14 +1715,18 @@ function updateCar(c, dt, input){
         0x555550, 0.6, 0.6);
     }
   }
-  // boost flames
+  // boost flames — layered plume of glowing embers + dark smoke
   if(input.boost && c.boost>0){
-    const back = carForward(c).multiplyScalar(-3.4*c.veh.scale);
-    for(let k=0;k<2;k++){
-      spawnPart(c.pos.x+back.x+(Math.random()-0.5), c.pos.y+1.3*c.veh.scale, c.pos.z+back.z+(Math.random()-0.5),
-        back.x*3+(Math.random()-0.5)*4, 1+Math.random()*2, back.z*3+(Math.random()-0.5)*4,
-        Math.random()<0.5 ? 0xff8a1e : 0xffd23e, 0.28+Math.random()*0.15, 0.8);
+    const fwd = carForward(c);
+    const bx=-fwd.x, bz=-fwd.z, s=c.veh.scale;
+    const px=c.pos.x+bx*3.4*s, py=c.pos.y+1.3*s, pz=c.pos.z+bz*3.4*s;
+    for(let k=0;k<3;k++){
+      const hot=Math.random()<0.4;
+      spawnGlow(px+(Math.random()-0.5)*1.3, py+(Math.random()-0.5)*0.6, pz+(Math.random()-0.5)*1.3,
+        bx*(10+Math.random()*9)+(Math.random()-0.5)*3, 1.5+Math.random()*2, bz*(10+Math.random()*9)+(Math.random()-0.5)*3,
+        hot?0xfff2c0:(Math.random()<0.5?0xff8a1e:0xffcf3e), 0.28+Math.random()*0.16, hot?1.6*s:1.15*s, 5);
     }
+    if(Math.random()<0.45) spawnPart(px, py+0.4, pz, bx*4, 2.2, bz*4, 0x33302a, 0.5, 0.9);
   }
 
   // visual
@@ -1763,7 +1824,16 @@ function carBallCollide(c, dt){
       crowdHype = Math.max(crowdHype, 0.5);
       if(c.isPlayer) crowdCheer(1.0);
     }
-    if(impact>4) thump(Math.min(1, impact/40));
+    if(impact>4){
+      thump(Math.min(1, impact/40));
+      // hay + dust puff at the contact point, plus sparks on a big wallop
+      const np = Math.min(16, (4+impact*0.35)|0), cx=ball.pos.x-n.x*BALL_R, cy=ball.pos.y-n.y*BALL_R, cz=ball.pos.z-n.z*BALL_R;
+      for(let k=0;k<np;k++) spawnPart(cx, cy, cz,
+        (Math.random()-0.5)*impact*0.6, 1+Math.random()*3, (Math.random()-0.5)*impact*0.6,
+        Math.random()<0.5?0xc9a84c:0xbfae86, 0.4+Math.random()*0.3, 0.5+Math.random()*0.5);
+      if(impact>14) for(let k=0;k<7;k++) spawnGlow(cx, cy, cz,
+        (Math.random()-0.5)*impact, Math.random()*4, (Math.random()-0.5)*impact, 0xfff2c0, 0.3+Math.random()*0.15, 0.9, -12);
+    }
     if(c.isPlayer && impact>4) rumble(Math.min(350, 60+impact*6), Math.min(1, impact/35), 0.5);
     // trash talk on big hits
     if(impact>26 && Math.random()<0.4 && !c.isPlayer) chatMsg(c.name, c.team, pick(LINES.chat));
@@ -1929,8 +1999,16 @@ function scoreGoal(team){
   announce(line, 3.4);
   if(team===playerTeam){ banjoLick(); crowdCheer(2.2); }
   else { sadTrombone(); crowdCheer(1.0); }
-  // fireworks + hype
-  burst(ball.pos, TEAM_COLOR[team]===TEAM_COLOR[0] ? 0x4fa3ff : 0xff6a4f, 70, 26);
+  // fireworks + hype — a big central pop plus scattered airborne bursts with glowing sparks
+  const fc = team===0 ? 0x4fa3ff : 0xff6a4f;
+  burst(ball.pos, fc, 80, 26);
+  for(let b=0;b<4;b++){
+    const bx=ball.pos.x+(Math.random()-0.5)*20, by=ball.pos.y+4+Math.random()*9, bz=ball.pos.z+(Math.random()-0.5)*20;
+    burst(new THREE.Vector3(bx,by,bz), Math.random()<0.5?fc:0xffd23e, 24, 20);
+    for(let k=0;k<14;k++) spawnGlow(bx, by, bz,
+      (Math.random()-0.5)*26, (Math.random()-0.25)*22, (Math.random()-0.5)*26,
+      Math.random()<0.5?0xfff2c0:fc, 0.6+Math.random()*0.5, 1.1, -14);
+  }
   camShake = 1.2; crowdHype = 1;
   const gx = team===0 ? 1 : -1;              // shove the ball on into the barn so ya see it roll all the way in
   ball.vel.set(gx*42, 7, ball.vel.z*0.35);
@@ -2188,6 +2266,7 @@ function animate(){
   }
 
   updateParticles(dt);
+  updateGlow(dt);
   updateCrowd(dt);
   updateDust(dt);
   updateCamera(dt);
