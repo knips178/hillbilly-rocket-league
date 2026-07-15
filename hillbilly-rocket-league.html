@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-14 iter 9 — ball + boost-pad detailing, per user request]
+- Ball is now a stuffed burlap feed sack ("EARL'S FEED & SEED"): woven texture, stitched seam,
+  brand stamp, plus 3D criss-cross twine bands that roll with it. Still a sphere (physics unchanged).
+- Boost pads are jars of moonshine (fits the "SHINE" boost): translucent glass, amber liquid, metal
+  lid, label, and a ground glow ring. Big pad = full jar, small = half-pint. pad.mesh is now the group.
+- Verified: node --check + smoke harness pass; ball + jar inspected in-browser.
 [2026-07-14 iter 8 — per-pick vehicle variety, per user request]
 - Each of the 5 lobby picks now reads distinct (typeId passed into the builders):
   - Deere John (pickup): classic garden tractor + rear toolbox + little smokestack.
@@ -943,29 +949,52 @@ function updateCrowd(dt){
 }
 
 // ---------------- BALL ----------------
+// the "ball" is a stuffed burlap feed sack — Earl's Feed & Seed
 const ballTex = makeCanvasTex(256,256,(g,w,h)=>{
-  g.fillStyle='#d8d0c0'; g.fillRect(0,0,w,h);
-  for(let i=0;i<40;i++){ g.fillStyle='rgba(90,70,40,'+(0.1+Math.random()*0.25)+')';
-    g.beginPath(); g.ellipse(Math.random()*w,Math.random()*h,4+Math.random()*16,3+Math.random()*10,Math.random()*3,0,7); g.fill(); }
-  g.strokeStyle='#777'; g.lineWidth=10;
-  g.beginPath(); g.moveTo(0,h/2); g.lineTo(w,h/2); g.stroke();
-  g.beginPath(); g.moveTo(w/2,0); g.lineTo(w/2,h); g.stroke();
-  g.fillStyle='#5a4a2a'; g.font='bold 30px Trebuchet MS'; g.textAlign='center';
-  g.fillText('PROPERTY OF', w/2, h/2-40); g.fillText("EARL", w/2, h/2+58);
+  g.fillStyle='#c9ad72'; g.fillRect(0,0,w,h);                    // burlap base
+  g.strokeStyle='rgba(120,95,55,0.32)'; g.lineWidth=2;          // woven weave
+  for(let i=0;i<w;i+=6){ g.beginPath(); g.moveTo(i,0); g.lineTo(i,h); g.stroke(); }
+  for(let i=0;i<h;i+=6){ g.beginPath(); g.moveTo(0,i); g.lineTo(w,i); g.stroke(); }
+  for(let i=0;i<22;i++){ g.fillStyle='rgba(80,60,35,'+(0.08+Math.random()*0.16)+')';   // dirt/stains
+    g.beginPath(); g.ellipse(Math.random()*w,Math.random()*h,6+Math.random()*20,5+Math.random()*14,Math.random()*3,0,7); g.fill(); }
+  g.strokeStyle='#5a4327'; g.lineWidth=3; g.setLineDash([9,7]);  // stitched seam
+  g.beginPath(); g.moveTo(0,h*0.5); g.lineTo(w,h*0.5); g.stroke(); g.setLineDash([]);
+  g.fillStyle='rgba(60,40,20,0.85)'; g.textAlign='center';       // brand stamp
+  g.font='bold 34px Trebuchet MS'; g.fillText('EARL’S', w/2, h*0.5-28);
+  g.font='bold 20px Trebuchet MS'; g.fillText('FEED & SEED', w/2, h*0.5+24); g.fillText('50 LBS', w/2, h*0.5+58);
 });
 const ballMesh = new THREE.Mesh(new THREE.SphereGeometry(BALL_R, 24, 18), new THREE.MeshLambertMaterial({ map: ballTex }));
 ballMesh.castShadow = true;
 scene.add(ballMesh);
+// criss-cross twine holding the sack together (rolls with the ball)
+{
+  const twineMat = new THREE.MeshLambertMaterial({ color:0xb98f4a });
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(BALL_R+0.08, BALL_R+0.08, 0.24, 24), twineMat);
+  ballMesh.add(band);
+  const band2 = band.clone(); band2.rotation.z = Math.PI/2; ballMesh.add(band2);
+}
 const ball = { pos:new THREE.Vector3(0,BALL_R,0), vel:new THREE.Vector3(), spin:new THREE.Vector3() };
 
 // ---------------- BOOST PADS ----------------
 const pads = [];
+// boost pads are jars of moonshine ("SHINE") — big pad = full jar, small = half-pint
 function addPad(x, z, big){
-  const geo = big ? new THREE.CylinderGeometry(3.2,3.2,0.8,16) : new THREE.CylinderGeometry(1.6,1.6,0.5,12);
-  const mat = new THREE.MeshLambertMaterial({ color: big?0xffb347:0xdd8833, emissive: big?0x995500:0x553300 });
-  const m = new THREE.Mesh(geo, mat); m.position.set(x, big?0.4:0.25, z);
-  scene.add(m);
-  pads.push({ x, z, big, mesh:m, timer:0, r: big?4.5:3.2 });
+  const grp = new THREE.Group(); grp.position.set(x,0,z);
+  const s = big ? 1.0 : 0.62;
+  const glass  = new THREE.MeshLambertMaterial({ color:0xdfe6cf, transparent:true, opacity:0.4 });
+  const shine  = new THREE.MeshLambertMaterial({ color:0xf0b24a, emissive: big?0xc07a10:0x8a560c });
+  const lid    = new THREE.MeshLambertMaterial({ color:0xc2c8ce, emissive:0x2e353a });
+  const label  = new THREE.MeshLambertMaterial({ color:0xece2c4 });
+  const jar    = new THREE.Mesh(new THREE.CylinderGeometry(1.5*s,1.4*s,2.0*s,14), glass);   jar.position.y=1.0*s;   grp.add(jar);
+  const liquid = new THREE.Mesh(new THREE.CylinderGeometry(1.32*s,1.28*s,1.35*s,14), shine); liquid.position.y=0.78*s; grp.add(liquid);
+  const cap    = new THREE.Mesh(new THREE.CylinderGeometry(1.55*s,1.55*s,0.4*s,14), lid);    cap.position.y=2.15*s;  grp.add(cap);
+  const tag    = new THREE.Mesh(new THREE.BoxGeometry(1.6*s,0.9*s,0.05), label);             tag.position.set(0,0.95*s,1.32*s); grp.add(tag);
+  // glow ring on the ground so ya can still read the pad
+  const ring = new THREE.Mesh(new THREE.CircleGeometry(big?4.2:2.8, 20),
+    new THREE.MeshBasicMaterial({ color: big?0xffb347:0xdd8833, transparent:true, opacity:0.28, depthWrite:false }));
+  ring.rotation.x=-Math.PI/2; ring.position.y=0.05; grp.add(ring);
+  scene.add(grp);
+  pads.push({ x, z, big, mesh:grp, timer:0, r: big?4.5:3.2 });
 }
 [[-72,-42],[-72,42],[72,-42],[72,42],[0,-46],[0,46]].forEach(([x,z])=>addPad(x,z,true));
 [[-40,0],[40,0],[-20,-25],[-20,25],[20,-25],[20,25],[0,0],[-60,0],[60,0],[-40,-38],[-40,38],[40,-38],[40,38]].forEach(([x,z])=>addPad(x,z,false));
