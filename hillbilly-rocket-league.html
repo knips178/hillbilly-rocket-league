@@ -1,6 +1,18 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-16 iter 18 — x-ray vision through blockers, per user request]
+- Problem: iter 17 let the camera retreat over the hay bales, which framed the car but traded the
+  fault — now the BALES were in the way, and the camera takes ~0.4s to crawl clear of them.
+- Fix: anything on the sight line between the lens and yer rig now goes see-through (opacity 0.12).
+  Occluders (hay bales, hicks, critters) register as the barn is built; each gets its own material
+  copy so it ghosts alone. Test is a fat cylinder round the camera->car ray (radius r+2.2) so you
+  see the rig AND what's stood next to it, skipping anything behind the lens or past the car.
+- Fade is eased (~0.1s in/out) so bales don't pop as they cross the sight line, and restores exactly
+  to the captured opacity/transparent/depthWrite when clear.
+- Verified in-browser: 159 occluders registered; worst-case corner ghosts 2 bales, car at NDC
+  (0.21,-0.47). Ramp measured smooth in BOTH directions (opacity 0.87 -> 0.40 -> 0.23 -> 0.12 in,
+  0.12 -> 0.05 -> 0.01 -> solid out). Harness-safe: stub has no isMesh, so nothing registers.
 [2026-07-14 iter 17 — corner camera fix, per user request]
 - Problem: in a corner you couldn't see yer own vehicle, so you were guessing how to get out.
   Cause: ball-cam wants to sit BEHIND the car (away from the ball); in a corner that spot is outside
@@ -4808,6 +4820,63 @@ function makeCanvasTex(w, h, draw){
   const t = new THREE.CanvasTexture(c); return t;
 }
 
+// ---------------- X-RAY: fade whatever gets between the camera and yer vehicle ----------------
+// The camera backs off past the touchline for a better angle, which parks it behind the hay bales.
+// Rather than wait for it to crawl clear, anything sitting on the sight line to yer car goes
+// see-through. Occluders register themselves as the barn is built.
+const occluders = [];
+function addOccluder(obj, r){
+  const mats = [];
+  (function walk(o){
+    if(o.isMesh && o.material){
+      // bales share one material — give a registered occluder its own copy so it fades alone
+      if(!o.userData._xray){ o.material = o.material.clone(); o.userData._xray = true; }
+      const arr = Array.isArray(o.material) ? o.material : [o.material];
+      for(const m of arr){
+        if(m.userData._op0 === undefined){ m.userData._op0 = m.opacity; m.userData._tr0 = m.transparent; m.userData._dw0 = m.depthWrite; }
+        mats.push(m);
+      }
+    }
+    const kids = o.children || [];
+    for(let i=0;i<kids.length;i++) walk(kids[i]);
+  })(obj);
+  if(mats.length) occluders.push({ obj, r, mats, f:0 });   // (harness stub has no isMesh -> nothing registers)
+}
+const XRAY_OP = 0.12;          // how ghostly a blocker gets
+const _xAB = new THREE.Vector3(), _xAP = new THREE.Vector3();
+function updateXray(target, dt){
+  if(!occluders.length) return;
+  const A = camera.position;
+  _xAB.copy(target).sub(A);
+  const len = _xAB.length();
+  const ok = len > 0.001;
+  if(ok) _xAB.multiplyScalar(1/len);
+  const k = Math.min(1, dt * 9);   // ~0.1s to ghost in/out, so bales don't pop
+  for(let i=0;i<occluders.length;i++){
+    const oc = occluders[i];
+    let want = 0;
+    if(ok){
+      _xAP.copy(oc.obj.position).sub(A);
+      const t = _xAP.dot(_xAB);
+      // on the sight line = in front of the lens, short of the car, and within a fat cylinder
+      // round the ray (fat enough to clear what's stood next to yer rig, not just the rig)
+      if(t > 0.3 && t < len - 1.0){
+        const R = oc.r + 2.2;
+        if(_xAP.lengthSq() - t*t <= R*R) want = 1;
+      }
+    }
+    if(want === oc.f && oc.f === 0) continue;              // already solid, nothing to do
+    oc.f += (want - oc.f) * k;
+    if(oc.f < 0.004) oc.f = 0;
+    const ms = oc.mats;
+    for(let j=0;j<ms.length;j++){
+      const m = ms[j], u = m.userData;
+      if(oc.f === 0){ m.opacity=u._op0; m.transparent=u._tr0; m.depthWrite=u._dw0; }
+      else { m.transparent=true; m.depthWrite=false; m.opacity = u._op0 + (XRAY_OP - u._op0) * oc.f; }
+    }
+  }
+}
+
 // ---------------- BARNYARD KIT (shared textures + critters) ----------------
 // weathered barn-red plank texture (walls, doors)
 const barnPlankTex = makeCanvasTex(256, 256, (g,w,h)=>{
@@ -4845,7 +4914,9 @@ const hayMat = new THREE.MeshLambertMaterial({ color:0xd8b24a });
 function hayBale(x,y,z, faceZ=true){
   const m = new THREE.Mesh(hayGeo, hayMat); m.position.set(x,y,z);
   if(faceZ) m.rotation.x = Math.PI/2; else m.rotation.z = Math.PI/2;  // round swirl faces the pitch
-  m.receiveShadow = true; return m;
+  m.receiveShadow = true;
+  addOccluder(m, 2.6);          // bales are the main thing that ends up between camera and car
+  return m;
 }
 
 const skinTones = [0xd9a066, 0xc98a5a, 0xe8b880, 0xb87a4a];
@@ -5157,14 +5228,14 @@ let crowdHype = 0, crowdT = 0;
       const baseY = 4.0;
       hick.position.set(x, baseY, z);
       hick.rotation.y = side>0 ? Math.PI : 0;                 // face the pitch
-      scene.add(hick);
+      scene.add(hick); addOccluder(hick, 1.3);
       crowdFolks.push({ grp: hick, baseY, phase: Math.random()*7 });
     }
     for(let i=0;i<6;i++){                                     // critters millin' in the back
       const a = makeAnimal(pick(critters));
       a.position.set(-ARENA.halfX+14 + Math.random()*(ARENA.halfX*2-28), 0, side*(ARENA.halfZ + 17 + Math.random()*10));
       a.rotation.y = Math.random()*Math.PI*2;
-      scene.add(a);
+      scene.add(a); addOccluder(a, 1.6);
     }
   });
 
@@ -6496,6 +6567,7 @@ function updateCamera(dt){
   camLook.lerp(lookTarget, 1 - Math.pow(0.000005, dt));
   const lk = camLook.clone(); lk.y += 1.2; // slight downward angle (~RL -3°)
   camera.lookAt(lk);
+  updateXray(p.pos, dt);   // ghost out anything standing between the lens and yer vehicle
   if(camShake > 0){
     camera.position.x += (Math.random()-0.5)*camShake*2.2;
     camera.position.y += (Math.random()-0.5)*camShake*2.2;
