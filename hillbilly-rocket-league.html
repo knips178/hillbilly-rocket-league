@@ -5771,7 +5771,11 @@ let ballCam = true;
 let padState = null, padButtonsPrev = [], padStickPrev = { x:0, y:0 };
 function activePad(){
   if(typeof navigator==='undefined' || !navigator.getGamepads) return null;
-  const gps = navigator.getGamepads();
+  let gps;
+  // Embedded pages (e.g. an iframe with a restrictive Permissions-Policy) throw a SecurityError
+  // here. This runs every frame, so an unguarded throw kills the render loop entirely.
+  try { gps = navigator.getGamepads(); } catch(e){ return null; }
+  if(!gps) return null;
   for(const gp of gps){ if(gp && gp.connected) return gp; }
   return null;
 }
