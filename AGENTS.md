@@ -19,7 +19,9 @@ MA-rated redneck-comedy Rocket League clone, solo vs bots. One self-contained Th
 
 ## Hard constraints (do not violate)
 
-- Keep it **one self-contained HTML file**; only external ref = `three.js r128` from cdnjs.
+- Keep it **one self-contained HTML file**. Baseline external ref = `three.js r128` from cdnjs; as of
+  iter 13 it also inlines the r128 GLTFLoader + SkeletonUtils and embeds a CC0 Quaternius cow GLB (base64)
+  — all in-file, no runtime fetch. Keep new assets embedded (base64) so the file stays self-contained.
 - Keep the MA-rated hillbilly-humor tone (profanity fine, **no slurs**).
 - Never remove existing features: lobby, bots, PS5-controller support (incl. menu navigation),
   TTS announcer, mute keys (M/V), demolitions.
