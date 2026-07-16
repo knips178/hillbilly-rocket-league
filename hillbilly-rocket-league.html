@@ -4691,10 +4691,20 @@ scene.fog = new THREE.Fog(0x46283c, 200, 460);
 const camera = new THREE.PerspectiveCamera(80, innerWidth/innerHeight, 0.5, 600);
 camera.position.set(0, 40, 90);
 
-addEventListener('resize', ()=>{
-  camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-});
+// Keep the canvas matched to the viewport. Re-checked every frame rather than only at load:
+// when the page is embedded (e.g. an artifact iframe) the window can report 0x0 while the script
+// runs, which would otherwise leave a 0x0 canvas — a black screen — forever.
+let _vpW = 0, _vpH = 0;
+function ensureSize(){
+  const w = window.innerWidth || document.documentElement.clientWidth || 0;
+  const h = window.innerHeight || document.documentElement.clientHeight || 0;
+  if(w > 0 && h > 0 && (w !== _vpW || h !== _vpH)){
+    _vpW = w; _vpH = h;
+    camera.aspect = w / h; camera.updateProjectionMatrix();
+    renderer.setSize(w, h);
+  }
+}
+addEventListener('resize', ensureSize);
 
 // lights (golden-hour vibes)
 scene.add(new THREE.HemisphereLight(0xbb7a99, 0x2a1d0d, 0.7));
@@ -6390,6 +6400,7 @@ refreshNav(); // initial lobby focus
 
 function animate(){
   requestAnimationFrame(animate);
+  ensureSize();
   let dt = Math.min(clock.getDelta(), 0.033);
 
   // gamepad — poll every frame, handle button edges
