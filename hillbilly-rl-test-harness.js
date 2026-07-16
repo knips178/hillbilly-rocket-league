@@ -159,6 +159,15 @@ console.log('camera clamp test — camPos:', camPos.x.toFixed(1), camPos.y.toFix
 if(Math.abs(camPos.z) > 52+18+0.5 || Math.abs(camPos.x) > 82-2.4) throw new Error('camera escaped the barn');
 if(Math.abs(camPos.z) > 52 && camPos.y < 8.5) throw new Error('camera behind the hay bales but too low to see over them');
 
+// camera follows the car into the goal recess (else it jams at the mouth in front of the car,
+// looking back out at the ball, with the car off the bottom of the screen)
+game.player.pos.set(88, 0, 0); ball.pos.set(0, 4.4, 0); ball.vel.set(0,0,0);
+for(let i=0;i<120;i++) frame();
+console.log('goal camera test — camPos:', camPos.x.toFixed(1), camPos.y.toFixed(1), camPos.z.toFixed(1));
+if(camPos.x < 82) throw new Error('camera did not follow the car into the goal');
+if(camPos.x > 82+26-2.4) throw new Error('camera punched out the back of the goal');
+if(Math.abs(camPos.z) > 15-1.4 || camPos.y > 12-1.4) throw new Error('camera clipped out of the goal recess');
+
 // bots-only + clock runout
 const before = game.score[0]+game.score[1];
 runFrames(60*240);

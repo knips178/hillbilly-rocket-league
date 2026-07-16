@@ -1,6 +1,18 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-16 iter 19 — camera snaps in corners + goals, per user request]
+- Camera stiffness now scales with how badly the clamp is starving the shot (`lost`, which peaks in
+  corners; forced to max in the goal). Measured settle-to-rest: corner 0.57s -> 0.25s, goal -> 0.23s.
+  Open field deliberately UNCHANGED at 0.57s — the lazy drift out there is the RL feel, worth keeping.
+- Found while measuring: snapping faster into the goal only got you to a useless shot. The camera
+  jammed at the goal MOUTH, in front of the car, staring back out at the ball — car at NDC y -3.07,
+  way off the bottom of the screen. The 26-deep goal was a room the camera was never let into.
+- Fix: when yer in the goal the camera follows into the recess (x up to halfX+goalDepth-2.5) and
+  obeys that little room's bounds (z +/-13.5, ceiling goalH-1.5) instead of the barn's. Car now
+  frames at NDC y -0.40, and you get a nice shot back out through the barn doors.
+- Harness: added a goal-camera test (follows in, doesn't punch out the back, stays in the recess).
+  The old "camera escaped the barn" x assertion was left intact but is now goal-aware.
 [2026-07-16 iter 18 — x-ray vision through blockers, per user request]
 - Problem: iter 17 let the camera retreat over the hay bales, which framed the car but traded the
   fault — now the BALES were in the way, and the camera takes ~0.4s to crawl clear of them.
@@ -6548,10 +6560,20 @@ function updateCamera(dt){
   // car in corners — the car dropped out of frame and you were guessing which way you pointed. The
   // barn is much bigger than the pitch, so let it retreat past the sideline and ride up over the
   // hay bales; ends stay clamped (the barn wall is right there).
+  // Drive it into the barn door and the camera used to jam at the goal mouth, in FRONT of the car,
+  // staring back out at the ball — the rig sat off the bottom of the screen (measured NDC y -3.07).
+  // When yer in the goal the camera follows you into the recess and works in that little room.
+  const inGoal = Math.abs(p.pos.x) > ARENA.halfX - 1 && Math.abs(p.pos.z) < ARENA.goalHalfW - 1;
   const CAM_OUT = 18;                                   // how far past the touchline it may retreat
-  want.x = THREE.MathUtils.clamp(want.x, -(ARENA.halfX-2.5), ARENA.halfX-2.5);
-  want.z = THREE.MathUtils.clamp(want.z, -(ARENA.halfZ+CAM_OUT), ARENA.halfZ+CAM_OUT);
-  if(Math.abs(want.z) > ARENA.halfZ) want.y = Math.max(want.y, 9);   // clear the hay-bale boards
+  const camMaxX = inGoal ? ARENA.halfX + ARENA.goalDepth - 2.5 : ARENA.halfX - 2.5;
+  want.x = THREE.MathUtils.clamp(want.x, -camMaxX, camMaxX);
+  const camInGoal = Math.abs(want.x) > ARENA.halfX - 1;
+  if(camInGoal){
+    want.z = THREE.MathUtils.clamp(want.z, -(ARENA.goalHalfW-1.5), ARENA.goalHalfW-1.5);
+  } else {
+    want.z = THREE.MathUtils.clamp(want.z, -(ARENA.halfZ+CAM_OUT), ARENA.halfZ+CAM_OUT);
+    if(Math.abs(want.z) > ARENA.halfZ) want.y = Math.max(want.y, 9);   // clear the hay-bale boards
+  }
   // Whatever pull-back the clamp still steals (deep corners), trade for height and lean the gaze
   // toward the car so it stays on screen instead of straight below the lens.
   const lost = Math.max(0, CAM_DIST - Math.hypot(want.x - p.pos.x, want.z - p.pos.z));
@@ -6559,12 +6581,20 @@ function updateCamera(dt){
     want.y += lost * 0.3;                                             // rise a little...
     lookTarget.lerp(p.pos, Math.min(0.85, (lost / CAM_DIST) * 2.0));  // ...and mostly look AT the car
   }
-  want.y = THREE.MathUtils.clamp(want.y, 2.2, ARENA.ceil-3);
-  // position stiffness (~RL 0.45)
-  camPos.lerp(want, 1 - Math.pow(0.0005, dt));
+  // low ceiling in the goal recess, else the barn's
+  want.y = THREE.MathUtils.clamp(want.y, 2.2, camInGoal ? ARENA.goalH-1.5 : ARENA.ceil-3);
+  // Stiffness scales with how badly the clamp is starving the shot: `lost` peaks in the corners, and
+  // in the goal there's barely room to pull back. Those are exactly the spots you can't see yer rig,
+  // so the camera quits easing and hustles instead of crawling over ~0.4s.
+  // (1 - b^dt === 1 - e^(-r*dt) with r = -ln(b); the open-field rates below match the old feel.)
+  const urgency = inGoal ? 1 : Math.min(1, (lost / CAM_DIST) * 2.0);
+  const posRate  =  7.6 + (22.0 -  7.6) * urgency;   // 95% settle: 0.39s open -> 0.14s cornered
+  const lookRate = 12.2 + (30.0 - 12.2) * urgency;   // 0.25s -> 0.10s
+  // position stiffness (~RL 0.45 in the open)
+  camPos.lerp(want, 1 - Math.exp(-posRate * dt));
   camera.position.copy(camPos);
   // smoothed swivel instead of snap-look
-  camLook.lerp(lookTarget, 1 - Math.pow(0.000005, dt));
+  camLook.lerp(lookTarget, 1 - Math.exp(-lookRate * dt));
   const lk = camLook.clone(); lk.y += 1.2; // slight downward angle (~RL -3°)
   camera.lookAt(lk);
   updateXray(p.pos, dt);   // ghost out anything standing between the lens and yer vehicle
