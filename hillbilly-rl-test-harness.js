@@ -151,11 +151,13 @@ for(let i=0;i<60*4;i++) frame();
 if(!(dbot.dead<=0 && dbot.mesh.visible)) throw new Error('respawn failed');
 console.log('respawn OK');
 
-// camera-in-arena test: park player against a wall in ball-cam, camera must stay inside
+// camera test: park player against a wall in ball-cam. The camera may retreat past the touchline
+// into the barn (that's where the room to see yer car is) but must stay inside the barn shell.
 game.player.pos.set(0, 0, -49); ball.pos.set(0, 4.4, 0); ball.vel.set(0,0,0);
 for(let i=0;i<120;i++) frame();
 console.log('camera clamp test — camPos:', camPos.x.toFixed(1), camPos.y.toFixed(1), camPos.z.toFixed(1));
-if(Math.abs(camPos.z) > 52-2.4 || Math.abs(camPos.x) > 82-2.4) throw new Error('camera escaped the arena');
+if(Math.abs(camPos.z) > 52+18+0.5 || Math.abs(camPos.x) > 82-2.4) throw new Error('camera escaped the barn');
+if(Math.abs(camPos.z) > 52 && camPos.y < 8.5) throw new Error('camera behind the hay bales but too low to see over them');
 
 // bots-only + clock runout
 const before = game.score[0]+game.score[1];

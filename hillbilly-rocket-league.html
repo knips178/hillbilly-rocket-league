@@ -1,6 +1,19 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-14 iter 17 — corner camera fix, per user request]
+- Problem: in a corner you couldn't see yer own vehicle, so you were guessing how to get out.
+  Cause: ball-cam wants to sit BEHIND the car (away from the ball); in a corner that spot is outside
+  the pitch, so the old clamp pinned the camera on top of the car — the car fell out of frame
+  (measured: car projected to NDC y -1.26, i.e. below the bottom edge).
+- Fix: the barn is far bigger than the pitch, so the camera may now retreat up to 18u PAST the
+  touchline and ride up over the hay bales (min y 9 so nothing blocks it). Ends stay clamped — the
+  barn wall is right there. Whatever pull-back is still stolen in deep corners is traded for a little
+  height (lost*0.3) and the gaze leans toward the car (up to 85%), so the car stays framed.
+- Tuned objectively by projecting car+ball to screen space and sweeping params. Worst-case corner now:
+  car at NDC (0.21,-0.47), ball at (-0.17,0.40) — both comfortably on screen.
+- Harness camera test updated: it asserted "inside the pitch", which is no longer the design; it now
+  asserts inside the BARN and that the camera clears the hay bales when it's behind them.
 [2026-07-14 iter 16 — soccer-specific audio, per user request]
 - Real "GOOOAL!" shout (Wikimedia, Frogfriend99 CC BY-SA 3.0) now fires on every goal alongside the
   train horn + crowd — the big emphasis moment finally has a voice.
@@ -6460,10 +6473,21 @@ function updateCamera(dt){
     want.y = p.pos.y + CAM_HEIGHT;
     lookTarget = p.pos.clone().addScaledVector(f, 18); lookTarget.y += 2;
   }
-  // RL-style: camera stays INSIDE the arena and slides along the glass —
-  // the walls can never sit between you and yer car
+  // The camera needs room to pull back. Pinning it to the touchline squeezed it right on top of the
+  // car in corners — the car dropped out of frame and you were guessing which way you pointed. The
+  // barn is much bigger than the pitch, so let it retreat past the sideline and ride up over the
+  // hay bales; ends stay clamped (the barn wall is right there).
+  const CAM_OUT = 18;                                   // how far past the touchline it may retreat
   want.x = THREE.MathUtils.clamp(want.x, -(ARENA.halfX-2.5), ARENA.halfX-2.5);
-  want.z = THREE.MathUtils.clamp(want.z, -(ARENA.halfZ-2.5), ARENA.halfZ-2.5);
+  want.z = THREE.MathUtils.clamp(want.z, -(ARENA.halfZ+CAM_OUT), ARENA.halfZ+CAM_OUT);
+  if(Math.abs(want.z) > ARENA.halfZ) want.y = Math.max(want.y, 9);   // clear the hay-bale boards
+  // Whatever pull-back the clamp still steals (deep corners), trade for height and lean the gaze
+  // toward the car so it stays on screen instead of straight below the lens.
+  const lost = Math.max(0, CAM_DIST - Math.hypot(want.x - p.pos.x, want.z - p.pos.z));
+  if(lost > 0.5){
+    want.y += lost * 0.3;                                             // rise a little...
+    lookTarget.lerp(p.pos, Math.min(0.85, (lost / CAM_DIST) * 2.0));  // ...and mostly look AT the car
+  }
   want.y = THREE.MathUtils.clamp(want.y, 2.2, ARENA.ceil-3);
   // position stiffness (~RL 0.45)
   camPos.lerp(want, 1 - Math.pow(0.0005, dt));
