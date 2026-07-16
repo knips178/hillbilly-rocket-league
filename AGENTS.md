@@ -22,7 +22,8 @@ MA-rated redneck-comedy Rocket League clone, solo vs bots. One self-contained Th
 - Keep it **one self-contained HTML file**. Baseline external ref = `three.js r128` from cdnjs; as of
   iter 13 it also inlines the r128 GLTFLoader + SkeletonUtils and embeds a CC0 Quaternius cow GLB (base64)
   — all in-file, no runtime fetch. Keep new assets embedded (base64) so the file stays self-contained.
-  Iter 14 also embeds 38 pre-rendered announcer VO clips (macOS say/"Grandpa") + 4 CC-licensed SFX.
+  Iter 15 embeds REAL recorded audio only: Kenney CC0 announcer barks + 4 CC-licensed SFX. There is
+  NO text-to-speech — synthesised speech sounded robotic and was rejected. Custom lines are text-only.
   Attribution for CC BY/BY-SA assets is REQUIRED and lives in the lobby credits line — keep it.
 - Keep the MA-rated hillbilly-humor tone (profanity fine, **no slurs**).
 - Never remove existing features: lobby, bots, PS5-controller support (incl. menu navigation),
