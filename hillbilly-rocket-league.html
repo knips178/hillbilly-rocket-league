@@ -1,6 +1,16 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-17 iter 23 — explain the blocked controller in the embedded artifact, per user report]
+- Report: "the PS5 controls stopped working." NOT a regression (iters 20-22 never touched input/pad
+  code; harness controller tests still pass). Cause: the Claude artifact iframe denies the Gamepad
+  API via Permissions-Policy, so navigator.getGamepads() throws SecurityError; the existing guard
+  (ec1b15d) catches it so the render loop survives, but the controller is then silently ignored.
+  Cannot be enabled from inside the page — the `allow=gamepad` permission is the parent frame's call.
+- Fix (the confusion, not the API — that's unfixable in-iframe): a hidden lobby banner reveals itself
+  the first time getGamepads() throws, telling the player the embedded view blocks controllers and to
+  open the downloaded file to use one. A merely-unplugged pad returns an array (no throw), so the
+  banner only trips on a real API denial, never on "no controller connected". Keyboard is unaffected.
 [2026-07-17 iter 22 — chamfered tractor hulls, per AAA models/animations goal]
 - The stacked-box tractor bodies are gone. Each pick's hull is now ONE beveled extrusion of a
   per-pick side profile (HULLS: pickup/muscle/mower — distinct silhouettes preserved on purpose),
@@ -347,6 +357,7 @@ STILL TO DO (ideas for future iterations):
     </div>
 
     <button id="start-btn">🏁 GIT 'ER DONE</button>
+    <div id="pad-blocked" style="display:none;margin-top:14px;padding:10px 14px;border:2px solid #c9702b;border-radius:8px;background:rgba(201,112,43,0.14);color:#f2c078;font-size:13px;line-height:1.4">🎮 <b>Heads up:</b> this embedded view blocks game controllers, so yer PS5 pad won't work here — that's the preview window, not the game. <b>Keyboard works fine.</b> To use the controller, download this page (⋯ menu → save) and open the file in yer browser directly.</div>
     <div id="lobby-tip" style="margin-top:18px;font-size:13px;color:#c9a15f;font-style:italic;min-height:20px"></div>
     <div class="warn">⌨️ W/S drive · A/D steer · SPACE jump (twice = flip) · SHIFT boost · C ball-cam · ESC pause · M mute · V announcer<br>🎮 PS5 controller: R2 gas · L2 reverse · stick steer · ✕ jump · ◯/R1 boost · △ ball-cam · OPTIONS start/pause<br>🎮 This whole menu works with the controller too: D-pad or stick to move, ✕ to pick, OPTIONS to start. Keyboard: arrows/WASD + ENTER.<br>(Pair the controller and press any button so the browser detects it.) Solo demo — yer teammates &amp; rivals are bots. Watch yer ass: supersonic hits DEMOLISH folks now.<br><br><small style="opacity:.75">CREDITS — Cow &amp; farmer models: <b>Quaternius</b> (CC0). Announcer voice: <b>Kenney</b> Voiceover Pack (CC0), kenney.nl. Sounds via Wikimedia Commons: goal shout by <b>Frogfriend99</b> (CC BY-SA 3.0), vuvuzela by <b>DisillusionedBitterAndKnackered</b> (CC BY-SA 3.0), referee whistle by <b>SpliceSound</b> (CC0), moo by <b>MichaeltheFox8621</b> (CC BY-SA 4.0), crowd by <b>WebbFilmsUK</b> (CC BY 4.0), sad trombone by <b>Sad Tromboner</b> (CC BY 4.0), train horn by <b>WeenyBeany</b> (CC BY 4.0). 3D engine: three.js (MIT).</small></div>
   </div>
@@ -6210,15 +6221,24 @@ let ballCam = true;
 // ---------------- GAMEPAD (PS5 DualSense & any standard pad) ----------------
 // R2 gas · L2 reverse · Left stick steer (+flip direction) · ✕ jump/flip · ◯ or R1 boost · △ ball-cam · OPTIONS pause/start
 let padState = null, padButtonsPrev = [], padStickPrev = { x:0, y:0 };
+let gamepadBlocked = false;
 function activePad(){
   if(typeof navigator==='undefined' || !navigator.getGamepads) return null;
   let gps;
   // Embedded pages (e.g. an iframe with a restrictive Permissions-Policy) throw a SecurityError
-  // here. This runs every frame, so an unguarded throw kills the render loop entirely.
-  try { gps = navigator.getGamepads(); } catch(e){ return null; }
+  // here. This runs every frame, so an unguarded throw kills the render loop entirely. It also
+  // means the controller silently does nothing in the artifact — flag it so the lobby can say so.
+  // (A merely-unplugged pad returns an array of nulls and does NOT throw, so this only trips when
+  // the API itself is denied, never for "no controller connected".)
+  try { gps = navigator.getGamepads(); } catch(e){ if(!gamepadBlocked){ gamepadBlocked = true; showPadBlocked(); } return null; }
   if(!gps) return null;
   for(const gp of gps){ if(gp && gp.connected) return gp; }
   return null;
+}
+function showPadBlocked(){
+  if(typeof document==='undefined') return;
+  const el = document.getElementById('pad-blocked');
+  if(el) el.style.display = 'block';
 }
 function dzone(v){ return Math.abs(v) < 0.13 ? 0 : v; }
 function pollPad(){
