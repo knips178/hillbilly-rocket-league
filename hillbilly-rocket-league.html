@@ -1,6 +1,17 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-17 iter 22 — chamfered tractor hulls, per AAA models/animations goal]
+- The stacked-box tractor bodies are gone. Each pick's hull is now ONE beveled extrusion of a
+  per-pick side profile (HULLS: pickup/muscle/mower — distinct silhouettes preserved on purpose),
+  plus wide arched torus fenders hugging the rear wheels. Chamfered flat-shaded single-color
+  hulls are the same visual language as the Quaternius farmer/cow, so vehicles match their drivers.
+- Nose-dependent trim (grille, lights, guard, emblems, exhaust height) is parametrized off each
+  hull's nose/hoodY, so the profiles can keep diverging without re-aiming the props.
+- Considered and REJECTED a downloaded tractor GLB: the only decent CC options (Poly by Google)
+  are a single 2MB merged mesh — no separable wheels (kills spin/steer anim), texture-baked
+  colors (kills team paint), and it would double the file. Procedural + bevel is the right tool.
+- Harness stub grew Shape/ExtrudeGeometry/TorusGeometry.
 [2026-07-17 iter 21 — living barnyard + demo ragdoll, per AAA models/animations goal; zero new bytes]
 - Background box cows -> clones of the ALREADY-EMBEDDED animated cow (Idle graze, herd-tinted,
   0.5-0.64 scale). Free fidelity: no new assets. upgradeStadium() is now called from BOTH loader
@@ -5626,8 +5637,27 @@ function makeRider(teamColor){
   return grp;
 }
 // mowing tractor (the "cars") — detailed ride-on mower; per-pick flavor via typeId
+// Per-pick hull side profiles (z forward, y up), extruded across the width with a bevel.
+// Chamfered single-color flat-shaded hulls are what makes artist low-poly read "modeled" —
+// this is the same look as the Quaternius farmer/cow, so the rigs finally match their drivers.
+const HULLS = {
+  pickup: { w:2.15, nose:2.35, hoodY:2.45, pts:[[-2.45,0.5],[-2.45,1.6],[-1.85,1.75],[-0.55,1.75],[-0.35,2.15],[0.55,2.3],[0.8,2.55],[2.15,2.35],[2.35,1.7],[2.35,0.85],[1.95,0.55]] },
+  muscle: { w:2.3,  nose:2.55, hoodY:2.15, pts:[[-2.6,0.5],[-2.6,1.5],[-1.95,1.62],[-0.5,1.62],[-0.3,1.95],[0.3,2.1],[2.3,2.2],[2.55,1.6],[2.55,0.8],[2.1,0.5]] },
+  mower:  { w:2.0,  nose:1.7,  hoodY:2.1,  pts:[[-2.2,0.5],[-2.2,1.7],[-1.7,1.85],[-0.6,1.85],[-0.4,2.1],[0.5,2.15],[1.5,2.05],[1.7,1.5],[1.7,0.8],[1.3,0.5]] },
+};
+function hullMesh(H, mat){
+  const s = new THREE.Shape();
+  s.moveTo(H.pts[0][0], H.pts[0][1]);
+  for(let i=1;i<H.pts.length;i++) s.lineTo(H.pts[i][0], H.pts[i][1]);
+  const geo = new THREE.ExtrudeGeometry(s, { depth:H.w, bevelEnabled:true, bevelThickness:0.14, bevelSize:0.14, bevelSegments:1, steps:1 });
+  const m = new THREE.Mesh(geo, mat);
+  m.rotation.y = -Math.PI/2;        // profile x -> world z (forward); extrusion -> across the width
+  m.position.x = H.w/2;
+  m.castShadow = true;
+  return m;
+}
 function mowingTractor(g, teamColor, typeId){
-  const paint  = new THREE.MeshLambertMaterial({ map: paintTex(teamColor) });
+  const paint  = new THREE.MeshLambertMaterial({ color: teamColor });
   const paintDk= new THREE.MeshLambertMaterial({ color: shade(teamColor, 0.62) });
   const dark   = new THREE.MeshLambertMaterial({ color: 0x201a12 });
   const seatMat= new THREE.MeshLambertMaterial({ color: 0x14100c });
@@ -5635,16 +5665,23 @@ function mowingTractor(g, teamColor, typeId){
   const tailL  = new THREE.MeshLambertMaterial({ color:0xcc2b2b, emissive:0x7a1010 });
   const B=(w,h,d,mat,x,y,z,rx,ry,rz)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat); m.position.set(x,y,z); if(rx)m.rotation.x=rx; if(ry)m.rotation.y=ry; if(rz)m.rotation.z=rz; m.castShadow=true; g.add(m); return m; };
   const C=(r1,r2,h,mat,x,y,z,rx,ry,rz,seg)=>{ const m=new THREE.Mesh(new THREE.CylinderGeometry(r1,r2,h,seg||16),mat); m.position.set(x,y,z); if(rx)m.rotation.x=rx; if(ry)m.rotation.y=ry; if(rz)m.rotation.z=rz; m.castShadow=true; g.add(m); return m; };
-  B(2.3,0.55,4.6, paintDk, 0,0.75,-0.1);                     // frame
-  // rounded hood + team paint
-  B(2.25,1.15,2.3, paint, 0,1.55,1.2);
-  C(1.13,1.13,2.3, paint, 0,2.1,1.2, Math.PI/2,0,0, 20);     // rounded hood top
-  // chrome grille + vertical bars + badge
-  B(1.95,0.95,0.14, chromeMat, 0,1.55,2.4);
-  for(let i=-2;i<=2;i++) B(0.1,0.85,0.2, dark, i*0.38,1.55,2.45);
-  C(0.26,0.26,0.1, chromeMat, 0,2.15,2.42, Math.PI/2,0,0, 14);
-  // rear fenders over the big wheels
-  [1,-1].forEach(sx=>{ B(0.78,0.16,2.2, paint, sx*1.5,2.34,-1.4, -0.12,0,0); B(0.16,0.72,2.2, paint, sx*1.86,1.95,-1.4); });
+  const H = HULLS[typeId] || HULLS.pickup;
+  const nose = H.nose;
+  // one chamfered hull instead of stacked boxes
+  g.add(hullMesh(H, paint));
+  B(2.0,0.5,4.4, paintDk, 0,0.42,-0.1);                      // undercarriage frame, tucked low
+  // chrome grille + vertical bars + badge on the nose face
+  B(1.75,0.85,0.14, chromeMat, 0,1.5,nose+0.05);
+  for(let i=-2;i<=2;i++) B(0.09,0.75,0.2, dark, i*0.34,1.5,nose+0.1);
+  C(0.24,0.24,0.1, chromeMat, 0,2.05,nose+0.07, Math.PI/2,0,0, 14);
+  // arched fenders over the rear wheels — widened across the tread, flush with the outer face
+  [1,-1].forEach(sx=>{
+    const fen = new THREE.Mesh(new THREE.TorusGeometry(1.3,0.17,8,14,Math.PI), paintDk);
+    fen.position.set(sx*1.7, 1.15, -1.45); fen.rotation.y = Math.PI/2;
+    fen.scale.z = 3.2;   // local z = across the wheel after the rotation
+    fen.castShadow = true;
+    g.add(fen);
+  });
   // dash + steering (wheel for most; zero-turn lap bars for the Grass Assassin)
   B(1.5,0.5,0.5, dark, 0,2.05,0.15);
   if(typeId==='mower'){
@@ -5674,26 +5711,26 @@ function mowingTractor(g, teamColor, typeId){
   B(1.0,0.5,0.9, steelMat, 1.95,0.62,1.5);                   // discharge chute
   // chrome exhaust (muscle gets its own twin stacks below)
   if(typeId!=='muscle'){
-    C(0.15,0.15,1.5, chromeMat, 0.95,2.45,0.85, 0,0,0, 10);
-    C(0.23,0.23,0.5, chromeMat, 0.95,3.25,0.85, 0,0,0, 10);
+    C(0.15,0.15,1.5, chromeMat, 0.95,H.hoodY+0.35,0.85, 0,0,0, 10);
+    C(0.23,0.23,0.5, chromeMat, 0.95,H.hoodY+1.15,0.85, 0,0,0, 10);
   }
   // head/tail lights
-  [0.7,-0.7].forEach(hx=>{ C(0.22,0.22,0.14, chromeMat, hx,1.8,2.42, Math.PI/2,0,0,12); C(0.15,0.15,0.08, lens, hx,1.8,2.5, Math.PI/2,0,0,12); });
+  [0.7,-0.7].forEach(hx=>{ C(0.22,0.22,0.14, chromeMat, hx,1.8,nose+0.07, Math.PI/2,0,0,12); C(0.15,0.15,0.08, lens, hx,1.8,nose+0.15, Math.PI/2,0,0,12); });
   [0.6,-0.6].forEach(tx=> B(0.28,0.2,0.1, tailL, tx,1.7,-1.78));
   // front chrome guard
-  C(0.1,0.1,2.0, chromeMat, 0,0.72,2.75, 0,0,Math.PI/2, 10);
+  C(0.1,0.1,2.0, chromeMat, 0,0.72,nose+0.4, 0,0,Math.PI/2, 10);
   // ---- per-pick flavor so each ride reads distinct ----
   if(typeId==='muscle'){                                     // Turbo Trimmer — souped-up zero-turn
     B(0.95,0.4,1.1, dark, 0,2.45,1.35); B(0.72,0.32,0.55, chromeMat, 0,2.72,1.35);           // hood scoop
     [1,-1].forEach(sx=> C(0.12,0.15,1.5, chromeMat, sx*1.22,2.15,0.4, 0.35,0,sx*0.16, 10));   // twin side stacks
     [1,-1].forEach(sx=> C(0.07,0.07,0.9, chromeMat, sx*0.95,3.1,-2.7, 0,0,0, 8));             // wing uprights
     B(2.5,0.12,0.65, paint, 0,3.6,-2.75);                                                     // rear wing
-    C(0.36,0.36,0.06, new THREE.MeshLambertMaterial({color:0xf4f4ec}), 0,2.12,2.46, Math.PI/2,0,0, 16); // race roundel
+    C(0.36,0.36,0.06, new THREE.MeshLambertMaterial({color:0xf4f4ec}), 0,2.02,nose+0.11, Math.PI/2,0,0, 16); // race roundel
   } else if(typeId==='mower'){                               // Grass Assassin — mean mulcher
     B(4.1,0.5,0.55, steelMat, 0,0.5,3.05);                                                    // extra-wide deck lip
     C(0.85,0.85,0.06, dark, 0,0.32,2.85, 0,0,0, 14);                                           // extra blade
     const bonez=new THREE.MeshLambertMaterial({color:0xeae6dc});
-    C(0.3,0.3,0.06, bonez, 0,2.12,2.46, Math.PI/2,0,0, 12); B(0.34,0.26,0.12, bonez, 0,1.74,2.5); // skull emblem
+    C(0.3,0.3,0.06, bonez, 0,1.92,nose+0.11, Math.PI/2,0,0, 12); B(0.34,0.26,0.12, bonez, 0,1.54,nose+0.15); // skull emblem
   } else {                                                   // Deere John — classic garden tractor
     B(1.2,0.6,0.7, dark, 0,1.95,-2.45);                                                        // rear toolbox
     C(0.13,0.13,0.95, chromeMat, -0.8,2.35,-0.5, 0,0,0, 8);                                    // little smokestack

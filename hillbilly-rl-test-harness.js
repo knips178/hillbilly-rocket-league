@@ -75,6 +75,7 @@ global.THREE = {
   PerspectiveCamera: Cam, HemisphereLight: Light, DirectionalLight: Light,
   Mesh, Group: class extends Obj3D{}, Sprite: class extends Obj3D{},
   PlaneGeometry:class{}, BoxGeometry:class{}, CylinderGeometry:class{}, ConeGeometry:class{}, SphereGeometry:class{}, CircleGeometry:class{},
+  TorusGeometry:class{}, ExtrudeGeometry:class{}, Shape:class{ moveTo(){} lineTo(){} quadraticCurveTo(){} },
   MeshLambertMaterial:Mat, MeshBasicMaterial:Mat, SpriteMaterial:class{}, CanvasTexture:class{},
   Vector3: V3,
   MathUtils:{ clamp:(v,a,b)=>Math.max(a,Math.min(b,v)) },
