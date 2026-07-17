@@ -1,6 +1,21 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-17 iter 24 — two new arenas with their own physics, per user request]
+- Lobby grows a "Pick yer arena" row (keyboard + controller nav; harness now D-pads down 5 rows).
+  All three venues share the pitch bounds — goals, camera, x-ray, harness geometry all unchanged.
+- MAW'S BARN: the classic. Baseline surface (grip 1, bounce 0.72).
+- FROZEN POND: the holler froze over. Ice physics: lateral grip 0.22 (measured slip angle 2.3 rad —
+  the tractor travels sideways while pointin' elsewhere), lifted-throttle drag nearly gone, ball
+  roll friction 0.995 (slides forever), lighter air drag. Cold blue fog/lights, milky cracked-ice
+  pitch texture (lines painted on the ice), snowfall sprites.
+- SKEETER BOG: the creek came up through the floor. Mud physics: grip 1.6, accel x0.82, top x0.82,
+  ball air drag 0.5 + bounce 0.38 (measured: dropped from 20, rebounds to 5.7 — lands like a wet
+  dog), roll dies fast. Murky green fog/lights, churned-mud pitch with ruts/puddles, firefly swarm.
+- applyArena() swaps floor texture + fog + hemi/sun tint + weather mode at startMatch; SURF global
+  feeds updateCar (grip/accel/top) and updateBall (drag/bounce/roll). PA chat line announces the
+  venue at kickoff. Harness: arena loop test (shot scores + ball stays in bounds on all three),
+  stubs grew Sprite material passthrough + Light colors.
 [2026-07-17 iter 23 — explain the blocked controller in the embedded artifact, per user report]
 - Report: "the PS5 controls stopped working." NOT a regression (iters 20-22 never touched input/pad
   code; harness controller tests still pass). Cause: the Claude artifact iframe denies the Gamepad
@@ -355,6 +370,14 @@ STILL TO DO (ideas for future iterations):
       <button class="pick-btn sel" data-len="300">5 MIN</button>
       <button class="pick-btn" data-len="600">10 MIN</button>
     </div>
+
+    <div class="section">Pick yer arena</div>
+    <div class="btn-row" id="arena-row">
+      <button class="pick-btn sel" data-arena="0">🌾 MAW'S BARN</button>
+      <button class="pick-btn" data-arena="1">❄️ FROZEN POND</button>
+      <button class="pick-btn" data-arena="2">🦟 SKEETER BOG</button>
+    </div>
+    <div id="arena-tip" style="margin-top:6px;font-size:13px;color:#c9a15f;font-style:italic;min-height:18px"></div>
 
     <button id="start-btn">🏁 GIT 'ER DONE</button>
     <div id="pad-blocked" style="display:none;margin-top:14px;padding:10px 14px;border:2px solid #c9702b;border-radius:8px;background:rgba(201,112,43,0.14);color:#f2c078;font-size:13px;line-height:1.4">🎮 <b>Heads up:</b> this embedded view blocks game controllers, so yer PS5 pad won't work here — that's the preview window, not the game. <b>Keyboard works fine.</b> To use the controller, download this page (⋯ menu → save) and open the file in yer browser directly.</div>
@@ -4649,7 +4672,23 @@ const LINES = {
 function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
 
 // ---------------- LOBBY STATE ----------------
-const lobby = { team: 0, vehicle: 0, size: 2, len: 300 };
+const lobby = { team: 0, vehicle: 0, size: 2, len: 300, arena: 0 };
+
+// Three venues, one holler. Same pitch bounds (physics/camera/goals unchanged), but the surface,
+// weather, light, and ball feel are each their own animal.
+const ARENAS_DEF = [
+  { name:"MAW'S BARN", tip:"The classic. Grass, grit, and Maw watchin' from the loft.",
+    kickLine:"LIVE FROM MAW'S BARN!",
+    surf:{ grip:1, accel:1, top:1, ballDrag:0.12, bounce:0.72, roll:0.95 } },
+  { name:"FROZEN POND", tip:"The holler froze over. Zero traction, all glory. Yer brakes are a suggestion.",
+    kickLine:"THE POND'S FROZE SOLID — TRY NOT TO DIE!",
+    surf:{ grip:0.22, accel:0.75, top:1.06, ballDrag:0.045, bounce:0.6, roll:0.995 } },
+  { name:"SKEETER BOG", tip:"The creek came up through the floor again. Mud's grabby, ball lands like a wet dog.",
+    kickLine:"WELCOME TO THE BOG — MIND THE SKEETERS!",
+    surf:{ grip:1.6, accel:0.82, top:0.82, ballDrag:0.5, bounce:0.38, roll:0.82 } },
+];
+// live surface physics (updateCar/updateBall read this); barn baseline until a match applies one
+let SURF = ARENAS_DEF[0].surf;
 
 // build vehicle cards
 (function(){
@@ -4672,6 +4711,12 @@ const lobby = { team: 0, vehicle: 0, size: 2, len: 300 };
   document.querySelectorAll('#len-row .pick-btn').forEach(b=>{
     b.onclick = ()=>{ document.querySelectorAll('#len-row .pick-btn').forEach(x=>x.classList.remove('sel')); b.classList.add('sel'); lobby.len=+b.dataset.len; };
   });
+  const atip = document.getElementById('arena-tip');
+  document.querySelectorAll('#arena-row .pick-btn').forEach(b=>{
+    b.onclick = ()=>{ document.querySelectorAll('#arena-row .pick-btn').forEach(x=>x.classList.remove('sel')); b.classList.add('sel');
+      lobby.arena=+b.dataset.arena; atip.textContent = ARENAS_DEF[lobby.arena].tip; };
+  });
+  atip.textContent = ARENAS_DEF[0].tip;
 })();
 
 // rotating lobby wisdom
@@ -4866,8 +4911,9 @@ function ensureSize(){
 }
 addEventListener('resize', ensureSize);
 
-// lights (golden-hour vibes)
-scene.add(new THREE.HemisphereLight(0xbb7a99, 0x2a1d0d, 0.7));
+// lights (golden-hour vibes; applyArena retints them per venue)
+const hemi = new THREE.HemisphereLight(0xbb7a99, 0x2a1d0d, 0.7);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffb070, 1.15);
 sun.position.set(60, 100, 40);
 sun.castShadow = true;
@@ -5140,6 +5186,113 @@ function updateDust(dt){
     if(d.m.position.y > 30) d.m.position.set((Math.random()-0.5)*150, 2, (Math.random()-0.5)*95);
     if(d.m.position.x > 80) d.m.position.x = -80; else if(d.m.position.x < -80) d.m.position.x = 80;
   }
+}
+
+// ---------------- ARENA VENUES: pitch surface + light + weather per pick ----------------
+// Shared line markings, drawn over whatever the surface is
+function drawPitchLines(g, w, h, col){
+  g.strokeStyle=col; g.lineWidth=6;
+  g.strokeRect(12,12,w-24,h-24);
+  g.beginPath(); g.moveTo(w/2,12); g.lineTo(w/2,h-12); g.stroke();
+  g.beginPath(); g.arc(w/2,h/2,88,0,7); g.stroke();
+  g.fillStyle=col; g.beginPath(); g.arc(w/2,h/2,7,0,7); g.fill();
+  g.strokeRect(12, h/2-150, 150, 300); g.strokeRect(w-162, h/2-150, 150, 300);
+}
+// frozen pond: milky ice, pressure cracks, frozen-over reeds, lines scraped in the frost
+const iceTex = makeCanvasTex(1024, 640, (g,w,h)=>{
+  const bg=g.createLinearGradient(0,0,w,h); bg.addColorStop(0,'#b8d4dc'); bg.addColorStop(0.5,'#a6c6d4'); bg.addColorStop(1,'#8fb4c6');
+  g.fillStyle=bg; g.fillRect(0,0,w,h);
+  for(let i=0;i<40;i++){ g.fillStyle='rgba(255,255,255,'+(0.05+Math.random()*0.1)+')';
+    g.beginPath(); g.ellipse(Math.random()*w, Math.random()*h, 30+Math.random()*90, 15+Math.random()*40, Math.random()*3, 0, 7); g.fill(); }
+  g.strokeStyle='rgba(70,110,130,0.5)'; g.lineWidth=2;                       // long pressure cracks
+  for(let i=0;i<14;i++){ let x=Math.random()*w, y=Math.random()*h; g.beginPath(); g.moveTo(x,y);
+    for(let k=0;k<5;k++){ x+=(Math.random()-0.3)*160; y+=(Math.random()-0.5)*120; g.lineTo(x,y); } g.stroke(); }
+  g.strokeStyle='rgba(255,255,255,0.35)'; g.lineWidth=1;                     // skate scuffs
+  for(let i=0;i<60;i++){ const x=Math.random()*w,y=Math.random()*h; g.beginPath(); g.moveTo(x,y);
+    g.quadraticCurveTo(x+40,y+(Math.random()-0.5)*30, x+90+Math.random()*60, y+(Math.random()-0.5)*40); g.stroke(); }
+  for(let i=0;i<26;i++){ g.fillStyle='rgba(90,90,60,0.5)';                   // reeds froze mid-wave
+    const x=Math.random()<0.5? Math.random()*40 : h-Math.random()*40; const px=Math.random()*w;
+    g.fillRect(px, Math.random()<0.5?Math.random()*36:h-36+Math.random()*30, 2, 10+Math.random()*16); }
+  drawPitchLines(g, w, h, 'rgba(160,60,40,0.55)');                           // lines painted on the ice
+  const vg=g.createRadialGradient(w/2,h/2,220,w/2,h/2,720); vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(20,40,60,0.3)');
+  g.fillStyle=vg; g.fillRect(0,0,w,h);
+});
+// skeeter bog: churned mud, standing water catching the light, ruts — lines in white lime powder
+const bogTex = makeCanvasTex(1024, 640, (g,w,h)=>{
+  const bg=g.createLinearGradient(0,0,0,h); bg.addColorStop(0,'#4a3a22'); bg.addColorStop(0.5,'#42331d'); bg.addColorStop(1,'#3a2c18');
+  g.fillStyle=bg; g.fillRect(0,0,w,h);
+  for(let i=0;i<7000;i++){ g.fillStyle = Math.random()<0.5 ? 'rgba(60,45,25,0.6)' : 'rgba(90,70,40,0.5)';
+    g.fillRect(Math.random()*w, Math.random()*h, 2+Math.random()*2, 2); }
+  for(let i=0;i<26;i++){ const x=Math.random()*w, y=Math.random()*h, rx=20+Math.random()*70, ry=8+Math.random()*28;  // puddles
+    g.fillStyle='rgba(30,34,30,0.75)'; g.beginPath(); g.ellipse(x,y,rx,ry,Math.random()*0.6,0,7); g.fill();
+    g.fillStyle='rgba(150,170,160,0.2)'; g.beginPath(); g.ellipse(x-rx*0.2,y-ry*0.25,rx*0.5,ry*0.4,0,0,7); g.fill(); }  // sky glint
+  g.strokeStyle='rgba(30,22,12,0.55)'; g.lineWidth=7;                        // deep tire ruts
+  for(let i=0;i<16;i++){ const x0=Math.random()*w,y0=Math.random()*h; g.beginPath(); g.moveTo(x0,y0);
+    g.bezierCurveTo(x0+90,y0+50,x0+180,y0-50,x0+280,y0+30); g.stroke(); }
+  for(let i=0;i<40;i++){ g.fillStyle='rgba(70,90,45,0.5)';                   // grass clumps hangin' on
+    g.beginPath(); g.ellipse(Math.random()*w, Math.random()*h, 4+Math.random()*8, 3+Math.random()*5, 0, 0, 7); g.fill(); }
+  drawPitchLines(g, w, h, 'rgba(238,235,215,0.5)');
+  const vg=g.createRadialGradient(w/2,h/2,220,w/2,h/2,720); vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,0.4)');
+  g.fillStyle=vg; g.fillRect(0,0,w,h);
+});
+// weather pool: snow for the pond, fireflies (skeeters with a lantern glow) for the bog
+const weather = [];
+for(let i=0;i<110;i++){
+  const m = new THREE.Sprite(new THREE.SpriteMaterial({ map:dustTex, transparent:true, opacity:0,
+    blending:THREE.AdditiveBlending, depthWrite:false }));
+  m.position.set((Math.random()-0.5)*170, Math.random()*34, (Math.random()-0.5)*120);
+  scene.add(m);
+  weather.push({ m, vx:0, vy:0, phase:Math.random()*7, sp:0.5+Math.random()*1.2 });
+}
+let weatherMode = 'off';
+function setWeather(mode){
+  weatherMode = mode;
+  for(const s of weather){
+    if(mode==='snow'){
+      s.m.material.color.setHex(0xffffff); s.m.material.opacity = 0.5+Math.random()*0.4;
+      const sc=0.25+Math.random()*0.3; s.m.scale.set(sc,sc,1);
+      s.vx=(Math.random()-0.5)*1.6; s.vy=-(1.6+Math.random()*1.6);
+      s.m.position.y = Math.random()*34;
+    } else if(mode==='fireflies'){
+      s.m.material.color.setHex(0xd8ff7a); s.m.material.opacity = 0;   // pulsed in update
+      const sc=0.35+Math.random()*0.35; s.m.scale.set(sc,sc,1);
+      s.vx=(Math.random()-0.5)*1.2; s.vy=(Math.random()-0.5)*0.6;
+      s.m.position.y = 1+Math.random()*7;
+    } else { s.m.material.opacity = 0; }
+  }
+}
+function updateWeather(dt){
+  if(weatherMode==='off') return;
+  const t = performance.now()/1000;
+  for(const s of weather){
+    s.m.position.x += s.vx*dt + Math.sin(t*s.sp+s.phase)*0.04;
+    s.m.position.y += s.vy*dt;
+    if(weatherMode==='snow'){
+      if(s.m.position.y < 0.2) s.m.position.set((Math.random()-0.5)*170, 32+Math.random()*4, (Math.random()-0.5)*120);
+    } else {
+      s.m.material.opacity = 0.28 + Math.sin(t*(1.6+s.sp)+s.phase*3)*0.28;   // blink
+      if(s.m.position.y<0.6) s.vy=Math.abs(s.vy); else if(s.m.position.y>9) s.vy=-Math.abs(s.vy);
+    }
+    if(s.m.position.x > 85) s.m.position.x = -85; else if(s.m.position.x < -85) s.m.position.x = 85;
+    if(s.m.position.z > 60) s.m.position.z = -60; else if(s.m.position.z < -60) s.m.position.z = 60;
+  }
+}
+// venue looks: [fog, fogNear, fogFar, hemi sky, hemi ground, sun color, sun intensity, floor map, weather]
+const ARENA_LOOKS = [
+  { fog:0x46283c, near:200, far:460, sky:0xbb7a99, ground:0x2a1d0d, sunC:0xffb070, sunI:1.15, map:()=>fieldTex, weather:'off' },
+  { fog:0x2c3c50, near:170, far:430, sky:0x9fc4e8, ground:0x24303c, sunC:0xcfe4ff, sunI:1.0,  map:()=>iceTex,  weather:'snow' },
+  { fog:0x25301e, near:140, far:400, sky:0x7a9a6a, ground:0x1a1608, sunC:0xd8e89a, sunI:0.8,  map:()=>bogTex,  weather:'fireflies' },
+];
+function applyArena(i){
+  const L = ARENA_LOOKS[i] || ARENA_LOOKS[0];
+  SURF = (ARENAS_DEF[i] || ARENAS_DEF[0]).surf;
+  if(scene.fog && scene.fog.color && scene.fog.color.setHex){
+    scene.fog.color.setHex(L.fog); scene.fog.near = L.near; scene.fog.far = L.far;
+  }
+  if(hemi.color && hemi.color.setHex){ hemi.color.setHex(L.sky); hemi.groundColor.setHex(L.ground); }
+  if(sun.color && sun.color.setHex){ sun.color.setHex(L.sunC); sun.intensity = L.sunI; }
+  if(floor.material){ floor.material.map = L.map(); floor.material.needsUpdate = true; }
+  setWeather(L.weather);
 }
 
 // outer ground (mud)
@@ -6162,6 +6315,7 @@ function refreshNav(){
       Array.from(document.querySelectorAll('.vcard')),
       Array.from(document.querySelectorAll('#size-row .pick-btn')),
       Array.from(document.querySelectorAll('#len-row .pick-btn')),
+      Array.from(document.querySelectorAll('#arena-row .pick-btn')),
       [document.getElementById('start-btn')],
     ];
   } else { menuNav.rows = []; return; }
@@ -6324,10 +6478,10 @@ function updateCar(c, dt, input){
     // throttle
     let throttle = input.throttle;
     const fwdSpeed = c.vel.dot(f);
-    let max = v.top;
-    if(input.boost && c.boost>0){ max = v.top + 16; }
-    c.vel.x += f.x * v.accel * throttle * dt;
-    c.vel.z += f.z * v.accel * throttle * dt;
+    let max = v.top * SURF.top;
+    if(input.boost && c.boost>0){ max = v.top * SURF.top + 16; }
+    c.vel.x += f.x * v.accel * SURF.accel * throttle * dt;
+    c.vel.z += f.z * v.accel * SURF.accel * throttle * dt;
     if(input.boost && c.boost>0){
       c.vel.x += f.x*30*dt; c.vel.z += f.z*30*dt;
       c.boost = Math.max(0, c.boost - 28*dt);
@@ -6340,9 +6494,10 @@ function updateCar(c, dt, input){
     const nf = carForward(c);
     const fwdComp = c.vel.dot(nf);
     const latV = c.vel.clone().sub(nf.clone().multiplyScalar(fwdComp));
-    c.vel.sub(latV.multiplyScalar(Math.min(1, 9*dt)));
-    // rolling drag + no-throttle brake
-    const drag = throttle===0 ? 1.8 : 0.35;
+    // ice barely bites (drift city); bog mud grabs hard
+    c.vel.sub(latV.multiplyScalar(Math.min(1, 9*SURF.grip*dt)));
+    // rolling drag + no-throttle brake (a lifted throttle barely slows ya on ice)
+    const drag = (throttle===0 ? 1.8 : 0.35) * (SURF.grip < 1 ? SURF.grip*2 : 1);
     c.vel.x -= c.vel.x*drag*dt; c.vel.z -= c.vel.z*drag*dt;
     // clamp
     const s2 = Math.hypot(c.vel.x,c.vel.z);
@@ -6469,16 +6624,17 @@ function updateCar(c, dt, input){
 
 function updateBall(dt){
   ball.vel.y += GRAV_BALL*dt;
-  // drag
-  ball.vel.multiplyScalar(1 - 0.12*dt);
+  // drag (bog air is thick with skeeters; pond air is thin and slick)
+  ball.vel.multiplyScalar(1 - SURF.ballDrag*dt);
   ball.pos.addScaledVector(ball.vel, dt);
 
   // floor
   if(ball.pos.y < BALL_R){
     ball.pos.y = BALL_R;
     if(Math.abs(ball.vel.y)>2) thump(Math.min(1,Math.abs(ball.vel.y)/30));
-    ball.vel.y = -ball.vel.y * 0.72;
-    ball.vel.x *= 0.95; ball.vel.z *= 0.95;
+    // pond ice skitters the sack along; bog mud eats the bounce whole
+    ball.vel.y = -ball.vel.y * SURF.bounce;
+    ball.vel.x *= SURF.roll; ball.vel.z *= SURF.roll;
     if(Math.abs(ball.vel.y)<2.5) ball.vel.y = 0;
   }
   // ceiling
@@ -6834,8 +6990,10 @@ function startMatch(rematch){
 
   document.getElementById('lobby').style.display='none';
   HUD.hud.style.display='block';
+  applyArena(lobby.arena);
   audio(); // unlock audio on user gesture
   startEngine();
+  chatMsg('PA', 0, ARENAS_DEF[lobby.arena].kickLine);
   announceVO('kickoff', 3);
   resetKickoff();
   refreshNav();
@@ -7046,6 +7204,7 @@ function animate(){
   updateGlow(dt);
   updateCrowd(dt);
   updateDust(dt);
+  updateWeather(dt);
   updateCamera(dt);
   renderer.render(scene, camera);
 }

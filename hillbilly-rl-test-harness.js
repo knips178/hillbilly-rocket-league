@@ -66,17 +66,18 @@ class Obj3D {
 }
 class Mesh extends Obj3D{ constructor(g,m){super(); this.geometry=g; this.material=m;} clone(){ return new Mesh(this.geometry,this.material); } }
 class Cam extends Obj3D{ constructor(){super(); this.aspect=1; this.fov=80;} updateProjectionMatrix(){} }
-class Light extends Obj3D{ constructor(){super(); this.shadow={mapSize:{set(){}},camera:{left:0,right:0,top:0,bottom:0,far:0}};} }
+class Light extends Obj3D{ constructor(){super(); this.color={setHex(){}}; this.groundColor={setHex(){}}; this.intensity=1;
+  this.shadow={mapSize:{set(){}},camera:{left:0,right:0,top:0,bottom:0,far:0}};} }
 class Mat { constructor(){ this.color={setHex(){}}; this.opacity=1; } }
 global.THREE = {
   WebGLRenderer: class { constructor(){ this.domElement=makeEl('canvas'); this.shadowMap={}; }
     setSize(){} setPixelRatio(){} render(){} },
   Scene: class extends Obj3D { }, Color: class{}, Fog: class{},
   PerspectiveCamera: Cam, HemisphereLight: Light, DirectionalLight: Light,
-  Mesh, Group: class extends Obj3D{}, Sprite: class extends Obj3D{},
+  Mesh, Group: class extends Obj3D{}, Sprite: class extends Obj3D{ constructor(m){ super(); this.material = m || new Mat(); } },
   PlaneGeometry:class{}, BoxGeometry:class{}, CylinderGeometry:class{}, ConeGeometry:class{}, SphereGeometry:class{}, CircleGeometry:class{},
   TorusGeometry:class{}, ExtrudeGeometry:class{}, Shape:class{ moveTo(){} lineTo(){} quadraticCurveTo(){} },
-  MeshLambertMaterial:Mat, MeshBasicMaterial:Mat, SpriteMaterial:class{}, CanvasTexture:class{},
+  MeshLambertMaterial:Mat, MeshBasicMaterial:Mat, SpriteMaterial:Mat, CanvasTexture:class{},
   Vector3: V3,
   MathUtils:{ clamp:(v,a,b)=>Math.max(a,Math.min(b,v)) },
   Clock: class{ getDelta(){ return 1/60; } },
@@ -103,8 +104,8 @@ function frame(){ const fn=rafQueue.shift(); if(fn) fn(); while(pendingTimeouts.
 function runFrames(n){ for(let f=0; f<n && game.state!=='end'; f++) frame(); }
 function press(i){ fakePad.buttons[i].pressed=true; frame(); fakePad.buttons[i].pressed=false; frame(); }
 
-// controller menu-nav test (in lobby)
-press(13); press(13); press(13); press(13);
+// controller menu-nav test (in lobby) — 6 rows now (team, ride, size, length, arena, start)
+press(13); press(13); press(13); press(13); press(13);
 press(0);
 console.log('controller menu start test — state:', game.state, '(expect countdown)');
 if(game.state!=='countdown') throw new Error('controller menu start failed');
@@ -168,6 +169,23 @@ console.log('goal camera test — camPos:', camPos.x.toFixed(1), camPos.y.toFixe
 if(camPos.x < 82) throw new Error('camera did not follow the car into the goal');
 if(camPos.x > 82+26-2.4) throw new Error('camera punched out the back of the goal');
 if(Math.abs(camPos.z) > 15-1.4 || camPos.y > 12-1.4) throw new Error('camera clipped out of the goal recess');
+
+// arena test: each venue swaps surface physics but a clean shot still scores and stays in bounds
+for(const ai of [1, 2]){
+  lobby.arena = ai;
+  game.state='lobby'; startMatch(false);
+  for(let i=0;i<60*20 && game.state!=='play';i++) frame();
+  for(const c of cars){ c.pos.set(-70+Math.random()*6, 0, -40+Math.random()*6); c.vel.set(0,0,0); }
+  ball.pos.set(70, 5, 0); ball.vel.set(85, 0, 0);
+  runFrames(45);
+  console.log('arena', ai, 'shot test — score:', game.score, 'state:', game.state);
+  if(game.score[0] !== 1) throw new Error('arena '+ai+' shot did not score');
+  runFrames(60*3);
+  if(Math.abs(ball.pos.x) > 100 || Math.abs(ball.pos.z) > 60) throw new Error('arena '+ai+': ball escaped');
+}
+lobby.arena = 0;                          // back to the barn for the long-run tests
+game.state='lobby'; startMatch(false);
+for(let i=0;i<60*20 && game.state!=='play';i++) frame();
 
 // bots-only + clock runout
 const before = game.score[0]+game.score[1];
