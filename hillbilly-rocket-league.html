@@ -1,6 +1,14 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-17 iter 21 — living barnyard + demo ragdoll, per AAA models/animations goal; zero new bytes]
+- Background box cows -> clones of the ALREADY-EMBEDDED animated cow (Idle graze, herd-tinted,
+  0.5-0.64 scale). Free fidelity: no new assets. upgradeStadium() is now called from BOTH loader
+  callbacks (cow + farmer) because their parse order isn't guaranteed — each upgrades what it can.
+- All 12 background critters wander: slow drift + casual turns, leashed to home (r 6). Heading
+  convention unified (box critters face +X at rest -> yawOff -PI/2; GLB cow faces +Z -> 0).
+- Demolitions eject the driver: a farmer corpse spawns beside the wreck playing the Death clip
+  (LoopOnce + clamp), lies there ~2.8s, fades out with the respawn. deadFolks pool in updateCrowd.
 [2026-07-17 iter 20 — animated farmer character everywhere, per AAA models/animations goal]
 - Embedded a rigged CC0 Quaternius Farmer (GLB base64, ~720KB: stripped 14 unused gun/sword clips
   with gltf-transform, kept 10). NOTE: gltf-transform quantize() BREAKS r128 skinned meshes
@@ -11,7 +19,7 @@ CHANGELOG (upgrade loop — newest first)
 - Crowd: the 22 frozen box hicks are now farmers with real skeletal animation — desynced
   Idle/Idle_Neutral sway; when crowdHype spikes (goal/demo/save) they erupt into
   Wave/Punch_Left/Punch_Right/Interact and settle back after. Bale bounce kept on top.
-  Crowd spawns before the async GLB parse lands, so upgradeCrowd() swaps them in place
+  Crowd spawns before the async GLB parse lands, so upgradeStadium() swaps them in place
   (and re-registers their x-ray occluder entries).
 - Riders: tractor drivers + cow riders are seated farmers. Sit pose = leg bones overridden
   AFTER mixer.update (SIT_UP/-LO), so standing clips animate the torso while the legs stay
@@ -5235,7 +5243,7 @@ billboard("TRUCK NUTS: BUY 2 GET 1 FREE", 40, -ARENA.halfZ-18, 0, '#2a4a1a', '#f
 })();
 
 // ---------------- STADIUM DRESSIN' ----------------
-const crowdFolks = [];
+const crowdFolks = [], critterFolks = [], deadFolks = [];
 let crowdHype = 0, crowdT = 0;
 (function stadium(){
   const wood = new THREE.MeshLambertMaterial({ color:0x6b4a26 });
@@ -5266,10 +5274,16 @@ let crowdHype = 0, crowdT = 0;
       crowdFolks.push({ grp: hick, baseY, phase: Math.random()*7 });
     }
     for(let i=0;i<6;i++){                                     // critters millin' in the back
-      const a = makeAnimal(pick(critters));
+      const kind = pick(critters);
+      const a = makeAnimal(kind);
       a.position.set(-ARENA.halfX+14 + Math.random()*(ARENA.halfX*2-28), 0, side*(ARENA.halfZ + 17 + Math.random()*10));
       a.rotation.y = Math.random()*Math.PI*2;
       scene.add(a); addOccluder(a, 1.6);
+      // heading convention: ang is the world direction (sin,cos); the box critters face +X at
+      // rotation 0 so they carry a -PI/2 offset (the GLB cow faces +Z and overrides to 0)
+      critterFolks.push({ grp:a, kind, home:{ x:a.position.x, z:a.position.z },
+                          ang: a.rotation.y + Math.PI/2, yawOff: -Math.PI/2,
+                          spd: 0.3+Math.random()*0.5, turnT: 1+Math.random()*3 });
     }
   });
 
@@ -5363,6 +5377,28 @@ function updateCrowd(dt){
       a.cur.setEffectiveTimeScale(0.85 + Math.random()*0.35);
     }
     updateChar(a, dt);
+  }
+  // critters mosey about their patch — slow drift, casual turns, never far from home
+  for(const f of critterFolks){
+    f.turnT -= dt;
+    if(f.turnT <= 0){ f.turnT = 2 + Math.random()*4; f.wantAng = f.ang + (Math.random()-0.5)*2.2; }
+    const dx = f.grp.position.x - f.home.x, dz = f.grp.position.z - f.home.z;
+    if(dx*dx + dz*dz > 36) f.wantAng = Math.atan2(-dx, -dz);          // strayed — head on home
+    if(f.wantAng !== undefined) f.ang += (f.wantAng - f.ang) * Math.min(1, 1.6*dt);
+    f.grp.position.x += Math.sin(f.ang) * f.spd * dt;
+    f.grp.position.z += Math.cos(f.ang) * f.spd * dt;
+    f.grp.rotation.y = f.ang + f.yawOff;
+    if(f.grp.userData.critterMix) f.grp.userData.critterMix.update(dt);
+  }
+  // demoed drivers layin' in the dirt
+  for(let i=deadFolks.length-1;i>=0;i--){
+    const d = deadFolks[i];
+    d.a.mixer.update(dt);
+    d.ttl -= dt;
+    if(d.ttl < 0.8) d.grp.traverse(function(o){ if(o.isMesh){
+      (Array.isArray(o.material)?o.material:[o.material]).forEach(function(m){ m.transparent = true; m.opacity = Math.max(0, d.ttl/0.8); });
+    }});
+    if(d.ttl <= 0){ scene.remove(d.grp); deadFolks.splice(i,1); }
   }
 }
 
@@ -5764,6 +5800,7 @@ let cowModel = null, cowClips = null;
     new THREE.GLTFLoader().parse(buf.buffer, '', function(gltf){
       gltf.scene.traverse(function(o){ if(o.isMesh){ o.castShadow = true; o.frustumCulled = false; } });
       cowModel = gltf.scene; cowClips = gltf.animations;
+      upgradeStadium();   // parse order vs the farmer isn't guaranteed — each loader upgrades what it can
     }, function(err){ console.warn('cow model parse failed', err); });
   } catch(e){ console.warn('cow model load skipped', e); }
 })();
@@ -5789,7 +5826,7 @@ function charClip(n){
     for (let i=0;i<raw.length;i++) buf[i] = raw.charCodeAt(i);
     new THREE.GLTFLoader().parse(buf.buffer, '', function(gltf){
       charModel = gltf.scene; charClips = gltf.animations;
-      upgradeCrowd();   // crowd spawns before this async parse lands — swap the box hicks in place
+      upgradeStadium();   // crowd spawns before this async parse lands — swap the box hicks in place
     }, function(err){ console.warn('farmer model parse failed', err); });
   } catch(e){ console.warn('farmer model load skipped', e); }
 })();
@@ -5816,7 +5853,7 @@ function buildCharacter(o){
   g.add(model);
   const mixer = new THREE.AnimationMixer(model);
   const act = {};
-  ['Idle','Idle_Neutral','Wave','Punch_Left','Punch_Right','Interact','Run'].forEach(function(n){
+  ['Idle','Idle_Neutral','Wave','Punch_Left','Punch_Right','Interact','Run','Death'].forEach(function(n){
     const c = charClip(n); if(c) act[n] = mixer.clipAction(c);
   });
   const a = { mixer, act, cur:null, sit: !!o.sit, reach: !!o.reach, bones:{
@@ -5863,9 +5900,10 @@ function makeDriver(){
 const DRV_S = 1.3, DRV_Y = 1.95, DRV_Z = -1.05;        // tractor seat fit (dialed in-browser)
 const CRID_S = 1.15, CRID_Y = 2.45, CRID_Z = -0.15;    // cow saddle fit (dialed in-browser)
 const CROWD_S = 1.75, CROWD_Y = 3.55;                  // standing on their bale
-// swap the frozen box hicks for living farmers once the model lands
-function upgradeCrowd(){
-  for(const f of crowdFolks){
+// The stadium spawns before the async GLB parses land, so each loader callback calls this to
+// swap box stand-ins for the real animated models in place. Idempotent; upgrades whatever's loaded.
+function upgradeStadium(){
+  if(charModel) for(const f of crowdFolks){
     if(f.grp.userData.charAnim) continue;
     f.baseClip = Math.random()<0.5 ? 'Idle' : 'Idle_Neutral';
     const c = buildCharacter({ shirt:pick(plaidCols), pants:(Math.random()<0.5?0x35507a:0x3a3f2a),
@@ -5876,6 +5914,33 @@ function upgradeCrowd(){
     f.baseY = CROWD_Y; c.position.y = CROWD_Y;
     scene.add(c); addOccluder(c, 1.3);
     f.grp = c;
+  }
+  // background box cows -> clones of the embedded animated cow, grazing on Idle. Free — no new bytes.
+  if(cowModel && cowClips) for(const f of critterFolks){
+    if(f.kind !== 'cow' || f.grp.userData.critterMix) continue;
+    const g = new THREE.Group();
+    const m = THREE.SkeletonUtils.clone(cowModel);
+    m.scale.setScalar(0.5 + Math.random()*0.14);
+    m.traverse(function(o){ if(o.isMesh){
+      o.material = Array.isArray(o.material) ? o.material.map(function(x){return x.clone();}) : o.material.clone();
+      (Array.isArray(o.material)?o.material:[o.material]).forEach(function(mt){
+        if(mt.color && mt.name==='White') mt.color.setRGB(0.95,0.93,0.88);
+        if(mt.color) mt.color.multiplyScalar(0.82 + Math.random()*0.18);   // herd variety
+      });
+      o.castShadow = true; o.frustumCulled = false;
+    }});
+    g.add(m);
+    const mixer = new THREE.AnimationMixer(m);
+    const clip = cowClips.find(function(c){ return c.name.toLowerCase().indexOf('idle')>=0; }) || cowClips[0];
+    const act = mixer.clipAction(clip); act.play();
+    act.setEffectiveTimeScale(0.7 + Math.random()*0.5);
+    mixer.update(Math.random()*4);
+    g.position.copy(f.grp.position); g.rotation.y = f.grp.rotation.y;
+    scene.remove(f.grp);
+    for(let i=occluders.length-1;i>=0;i--) if(occluders[i].obj===f.grp) occluders.splice(i,1);
+    scene.add(g); addOccluder(g, 1.6);
+    g.userData.critterMix = mixer;
+    f.grp = g; f.spd *= 0.6; f.yawOff = 0;   // real cows mosey slower; GLB faces +Z
   }
 }
 
@@ -6448,6 +6513,21 @@ function demolish(victim, culprit){
   victim.dead = 3;
   victim.mesh.visible = false; victim.tag.visible = false;
   burst(new THREE.Vector3(victim.pos.x, victim.pos.y+2, victim.pos.z), 0xff5522, 45, 22);
+  // the driver gets blown clear and eats dirt (Death clip, once, then fade with the respawn)
+  if(charModel){
+    const corpse = buildCharacter({ shirt:pick(plaidCols), pants:0x35507a, skin:pick(skinTones), scale:DRV_S, clip:'Idle' });
+    const a = corpse.userData.charAnim;
+    if(a.act.Death){
+      a.cur.stop();
+      a.cur = a.act.Death; a.cur.reset().setLoop(THREE.LoopOnce, 1).play();
+      a.cur.clampWhenFinished = true;
+    }
+    const away = Math.random()*Math.PI*2;
+    corpse.position.set(victim.pos.x + Math.sin(away)*4, 0, victim.pos.z + Math.cos(away)*4);
+    corpse.rotation.y = Math.random()*Math.PI*2;
+    scene.add(corpse);
+    deadFolks.push({ grp: corpse, a, ttl: 2.8 });
+  }
   boom();
   camShake = Math.max(camShake, 0.7); crowdHype = Math.max(crowdHype, 0.6);
   if(victim.isPlayer || culprit.isPlayer) rumble(500, 1, 0.8);
