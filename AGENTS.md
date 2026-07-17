@@ -25,6 +25,13 @@ MA-rated redneck-comedy Rocket League clone, solo vs bots. One self-contained Th
   Iter 15 embeds REAL recorded audio only: Kenney CC0 announcer barks + 4 CC-licensed SFX. There is
   NO text-to-speech — synthesised speech sounded robotic and was rejected. Custom lines are text-only.
   Attribution for CC BY/BY-SA assets is REQUIRED and lives in the lobby credits line — keep it.
+  Iter 20 embeds a CC0 Quaternius Farmer character (rigged GLB) for crowd + all riders/drivers.
+  **Embedded-GLB lessons (hard-won, do not relearn):** (1) gltf-transform `quantize()` breaks r128
+  skinned meshes (~50x scale error, black normals) — strip/resample/dedup/weld only, never quantize.
+  (2) r128 GLTFLoader emits linear-space material colors; this game has no sRGB output stage, so
+  rebuild materials as Lambert with `color.convertLinearToSRGB()` and `skinning:true` or they render
+  near-black / at bind pose. (3) Anything spawned at script-load time (crowd) must be upgraded in the
+  async parse callback; anything spawned at startMatch (riders) can check `charModel` directly.
 - Keep the MA-rated hillbilly-humor tone (profanity fine, **no slurs**).
 - Never remove existing features: lobby, bots, PS5-controller support (incl. menu navigation),
   TTS announcer, mute keys (M/V), demolitions.

@@ -62,7 +62,7 @@ class Obj3D {
     this.children=[]; this.visible=true; this.userData={}; this.castShadow=false; this.receiveShadow=false; }
   add(c){this.children.push(c); return this;}
   remove(c){this.children=this.children.filter(x=>x!==c); return this;}
-  rotateX(){} lookAt(){}
+  rotateX(){} rotateZ(){} lookAt(){}
 }
 class Mesh extends Obj3D{ constructor(g,m){super(); this.geometry=g; this.material=m;} clone(){ return new Mesh(this.geometry,this.material); } }
 class Cam extends Obj3D{ constructor(){super(); this.aspect=1; this.fov=80;} updateProjectionMatrix(){} }
