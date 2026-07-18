@@ -1,6 +1,22 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-18 iter 25 — bog goes open-air + MALLARD MARSH duck-hunt arena, per user request]
+- Skeeter Bog no longer looks like it's in the barn: the whole barn shell (side walls, loft windows,
+  roof, rafters, work-lights) is now a toggleable group; outdoor venues hide it and play under the
+  open sky dome. Bog gained its own scenery ring: cypress trees with hangin' moss, cattail banks,
+  dead snags. Barn + Frozen Pond keep the shell exactly as before (pond is APPROVED — untouched).
+- NEW ARENA 4: MALLARD MARSH — duck-huntin' at dawn. Shin-deep water pitch (tea-colored water
+  texture: ripple rings, painted pads, drowned grass) + 26 floating 3D lily pads and flowers ON the
+  field (visual only), cattail banks, a half-sunk skiff, and four camo duck blinds up on 9.4u stilts
+  so they loom over the hay-bale boards like deer stands (ladder, shooting slot, grass roof).
+- Ducks: flights of 3-5 procedural mallards (flapping wings, drake-green heads) cross the sky every
+  9-19s. The blinds let fly — shotgun crack (new noise-burst SFX), 55% chance a duck tumbles in a
+  puff of feathers, splashes down in the shallows. PA hollers "THAT'S SUPPER!". Ducks despawn when
+  ya leave the marsh.
+- Marsh physics: wet grip 0.7, accel x0.88, top x0.9, ball drag 0.22 / bounce 0.5 / roll 0.9 —
+  slipperier than grass, heavier than ice, livelier than the bog.
+- Harness: arena loop test now covers [1,2,3] (marsh exercises the duck path headlessly).
 [2026-07-17 iter 24 — two new arenas with their own physics, per user request]
 - Lobby grows a "Pick yer arena" row (keyboard + controller nav; harness now D-pads down 5 rows).
   All three venues share the pitch bounds — goals, camera, x-ray, harness geometry all unchanged.
@@ -376,6 +392,7 @@ STILL TO DO (ideas for future iterations):
       <button class="pick-btn sel" data-arena="0">🌾 MAW'S BARN</button>
       <button class="pick-btn" data-arena="1">❄️ FROZEN POND</button>
       <button class="pick-btn" data-arena="2">🦟 SKEETER BOG</button>
+      <button class="pick-btn" data-arena="3">🦆 MALLARD MARSH</button>
     </div>
     <div id="arena-tip" style="margin-top:6px;font-size:13px;color:#c9a15f;font-style:italic;min-height:18px"></div>
 
@@ -4686,6 +4703,9 @@ const ARENAS_DEF = [
   { name:"SKEETER BOG", tip:"The creek came up through the floor again. Mud's grabby, ball lands like a wet dog.",
     kickLine:"WELCOME TO THE BOG — MIND THE SKEETERS!",
     surf:{ grip:1.6, accel:0.82, top:0.82, ballDrag:0.5, bounce:0.38, roll:0.82 } },
+  { name:"MALLARD MARSH", tip:"Shin-deep water, lily pads, and birdshot rainin' from the blinds. Keep yer hat on.",
+    kickLine:"DAWN AT MALLARD MARSH — DUCKS, TAKE COVER!",
+    surf:{ grip:0.7, accel:0.88, top:0.9, ballDrag:0.22, bounce:0.5, roll:0.9 } },
 ];
 // live surface physics (updateCar/updateBall read this); barn baseline until a match applies one
 let SURF = ARENAS_DEF[0].surf;
@@ -5277,11 +5297,244 @@ function updateWeather(dt){
     if(s.m.position.z > 60) s.m.position.z = -60; else if(s.m.position.z < -60) s.m.position.z = 60;
   }
 }
-// venue looks: [fog, fogNear, fogFar, hemi sky, hemi ground, sun color, sun intensity, floor map, weather]
+// mallard marsh: shallow tea-colored water, ripple rings, lily pads, sunk grass — duck country
+const marshTex = makeCanvasTex(1024, 640, (g,w,h)=>{
+  const bg=g.createLinearGradient(0,0,0,h); bg.addColorStop(0,'#3a5548'); bg.addColorStop(0.5,'#33503f'); bg.addColorStop(1,'#2c4636');
+  g.fillStyle=bg; g.fillRect(0,0,w,h);
+  for(let i=0;i<50;i++){ g.fillStyle='rgba(190,215,200,0.08)';                       // sky sheen patches
+    g.beginPath(); g.ellipse(Math.random()*w, Math.random()*h, 40+Math.random()*100, 12+Math.random()*30, 0, 0, 7); g.fill(); }
+  g.strokeStyle='rgba(210,230,215,0.22)'; g.lineWidth=2;                             // ripple rings
+  for(let i=0;i<40;i++){ const x=Math.random()*w, y=Math.random()*h, r=6+Math.random()*22;
+    g.beginPath(); g.ellipse(x,y,r,r*0.4,0,0,7); g.stroke();
+    g.beginPath(); g.ellipse(x,y,r*1.7,r*0.65,0,0,7); g.stroke(); }
+  for(let i=0;i<70;i++){ g.fillStyle='rgba(70,110,60,'+(0.5+Math.random()*0.3)+')';  // lily pads
+    const x=Math.random()*w, y=Math.random()*h, r=7+Math.random()*14, a=Math.random()*7;
+    g.beginPath(); g.moveTo(x,y); g.arc(x,y,r,a+0.5,a+6.1); g.closePath(); g.fill();
+    g.fillStyle='rgba(120,160,90,0.4)'; g.beginPath(); g.ellipse(x-r*0.25,y-r*0.25,r*0.4,r*0.28,0,0,7); g.fill(); }
+  for(let i=0;i<90;i++){ g.fillStyle='rgba(105,125,70,0.5)';                         // drowned grass wisps
+    g.fillRect(Math.random()*w, Math.random()*h, 2, 5+Math.random()*9); }
+  drawPitchLines(g, w, h, 'rgba(240,238,220,0.42)');
+  const vg=g.createRadialGradient(w/2,h/2,220,w/2,h/2,720); vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,10,10,0.35)');
+  g.fillStyle=vg; g.fillRect(0,0,w,h);
+});
+
+// ---- outdoor venue scenery (hidden unless that arena's picked) ----
+// Skeeter Bog: cypress + moss + cattails + snags ring the pitch under open sky
+const bogScenery = new THREE.Group(); bogScenery.visible = false; scene.add(bogScenery);
+(function buildBog(){
+  const trunkM = new THREE.MeshLambertMaterial({ color:0x4a3a28 });
+  const mossM  = new THREE.MeshLambertMaterial({ color:0x54683a });
+  const mossHang = new THREE.MeshLambertMaterial({ color:0x76885c });
+  const catM   = new THREE.MeshLambertMaterial({ color:0x5a7a3a });
+  const tipM   = new THREE.MeshLambertMaterial({ color:0x6a4a22 });
+  function cypress(x, z, s){
+    const t = new THREE.Group();
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.7*s, 2.2*s, 22*s, 7), trunkM);
+    trunk.position.y = 11*s; trunk.castShadow = true; t.add(trunk);
+    for(let i=0;i<3;i++){                              // layered canopy
+      const c = new THREE.Mesh(new THREE.ConeGeometry((7-i*1.8)*s, 7*s, 8), mossM);
+      c.position.y = (18+i*4.5)*s; t.add(c);
+    }
+    for(let i=0;i<4;i++){                              // hangin' spanish moss
+      const m = new THREE.Mesh(new THREE.BoxGeometry(0.5*s, (3+Math.random()*3)*s, 0.2*s), mossHang);
+      const a = Math.random()*Math.PI*2, r = (3+Math.random()*3)*s;
+      m.position.set(Math.cos(a)*r, (16+Math.random()*4)*s, Math.sin(a)*r); t.add(m);
+    }
+    t.position.set(x, 0, z); bogScenery.add(t);
+  }
+  function cattails(x, z){
+    const g2 = new THREE.Group();
+    for(let i=0;i<5+Math.random()*4;i++){
+      const hgt = 2+Math.random()*1.6;
+      const st = new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.07,hgt,4), catM);
+      st.position.set((Math.random()-0.5)*2.4, hgt/2, (Math.random()-0.5)*2.4);
+      st.rotation.z = (Math.random()-0.5)*0.25; g2.add(st);
+      const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.14,0.14,0.6,5), tipM);
+      tip.position.set(st.position.x, hgt-0.1, st.position.z); g2.add(tip);
+    }
+    g2.position.set(x, 0, z); bogScenery.add(g2);
+  }
+  [1,-1].forEach(side=>{
+    for(let i=0;i<7;i++){
+      cypress(-ARENA.halfX+6+i*26+(Math.random()-0.5)*8, side*(ARENA.halfZ+34+Math.random()*18), 0.85+Math.random()*0.5);
+      cattails(-ARENA.halfX+14+i*22, side*(ARENA.halfZ+13+Math.random()*4));
+    }
+  });
+  [[-ARENA.halfX-38, -18],[ARENA.halfX+40, 22],[-ARENA.halfX-42, 30],[ARENA.halfX+36, -30]].forEach(([x,z])=> cypress(x, z, 1.15));
+  // dead snags catching the light
+  [[-30, 66],[42, -70],[70, 64]].forEach(([x,z])=>{
+    const sn = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.9, 14, 5), trunkM);
+    sn.position.set(x, 7, z); sn.rotation.z = (Math.random()-0.5)*0.2; bogScenery.add(sn);
+  });
+})();
+// Mallard Marsh: duck blinds on stilts, 3D lily pads on the water, cattail banks, a sunk skiff
+const marshScenery = new THREE.Group(); marshScenery.visible = false; scene.add(marshScenery);
+(function buildMarsh(){
+  const camoM  = new THREE.MeshLambertMaterial({ color:0x55603a });
+  const grassM = new THREE.MeshLambertMaterial({ color:0x8a9a5a });
+  const stiltM = new THREE.MeshLambertMaterial({ color:0x4a3a24 });
+  const padM   = new THREE.MeshLambertMaterial({ color:0x4a7a3a });
+  const padM2  = new THREE.MeshLambertMaterial({ color:0x5a8a46 });
+  function blind(x, z, face){
+    // up on tall stilts so it looms over the hay-bale boards like a deer stand
+    const b = new THREE.Group();
+    [[-2.4,-1.2],[2.4,-1.2],[-2.4,1.2],[2.4,1.2]].forEach(([sx,sz])=>{
+      const st = new THREE.Mesh(new THREE.CylinderGeometry(0.2,0.24,9.4,5), stiltM);
+      st.position.set(sx, 4.7, sz); b.add(st);
+    });
+    const brace = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.3, 0.3), stiltM);
+    brace.position.set(0, 3.4, 1.2); brace.rotation.z = 0.5; b.add(brace);
+    const box = new THREE.Mesh(new THREE.BoxGeometry(6.4, 3.0, 3.4), camoM);
+    box.position.y = 10.6; box.castShadow = true; b.add(box);
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(7.2, 0.5, 4.2), grassM);
+    roof.position.y = 12.3; roof.rotation.z = 0.04; b.add(roof);
+    const slot = new THREE.Mesh(new THREE.BoxGeometry(5.6, 0.8, 0.2), new THREE.MeshLambertMaterial({ color:0x14120a }));
+    slot.position.set(0, 10.9, 1.75); b.add(slot);
+    const ladder = new THREE.Mesh(new THREE.BoxGeometry(0.9, 9.4, 0.2), stiltM);
+    ladder.position.set(2.9, 4.7, 1.5); ladder.rotation.x = 0.12; b.add(ladder);
+    for(let i=0;i<7;i++){                              // brushed-in grass camo
+      const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.35, 1.6+Math.random(), 5), grassM);
+      tuft.position.set(-3+i, 9.6, 1.8); tuft.rotation.x = 0.25; b.add(tuft);
+    }
+    b.position.set(x, 0, z); b.rotation.y = face; marshScenery.add(b);
+    addOccluder(b, 3.4);
+  }
+  blind(-38, ARENA.halfZ+15, Math.PI); blind(44, ARENA.halfZ+16, Math.PI);
+  blind(-46, -(ARENA.halfZ+15), 0);    blind(36, -(ARENA.halfZ+16), 0);
+  // big lily pads floatin' on the pitch itself (visual only — ball n' tractors plow right over)
+  for(let i=0;i<26;i++){
+    const r = 1.1+Math.random()*1.5;
+    const pad = new THREE.Mesh(new THREE.CircleGeometry(r, 9), Math.random()<0.5?padM:padM2);
+    pad.rotation.x = -Math.PI/2; pad.rotation.z = Math.random()*7;
+    pad.position.set((Math.random()-0.5)*(ARENA.halfX*2-16), 0.07, (Math.random()-0.5)*(ARENA.halfZ*2-10));
+    marshScenery.add(pad);
+  }
+  for(let i=0;i<10;i++){                               // flowers on a few
+    const fl = new THREE.Mesh(new THREE.SphereGeometry(0.32, 6, 5), new THREE.MeshLambertMaterial({ color:0xf0d8e8 }));
+    fl.position.set((Math.random()-0.5)*(ARENA.halfX*2-20), 0.35, (Math.random()-0.5)*(ARENA.halfZ*2-14));
+    marshScenery.add(fl);
+  }
+  // cattail banks outside the play area
+  const catM = new THREE.MeshLambertMaterial({ color:0x5a7a3a }), tipM = new THREE.MeshLambertMaterial({ color:0x6a4a22 });
+  [1,-1].forEach(side=>{ for(let i=0;i<16;i++){
+    const x = -ARENA.halfX+5+i*10.5, z = side*(ARENA.halfZ+8.5+Math.random()*3);
+    for(let k=0;k<4;k++){
+      const hgt = 2+Math.random()*1.4;
+      const st = new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.07,hgt,4), catM);
+      st.position.set(x+(Math.random()-0.5)*2, hgt/2, z+(Math.random()-0.5)*2);
+      st.rotation.z=(Math.random()-0.5)*0.3; marshScenery.add(st);
+      const tp = new THREE.Mesh(new THREE.CylinderGeometry(0.13,0.13,0.55,5), tipM);
+      tp.position.set(st.position.x, hgt-0.1, st.position.z); marshScenery.add(tp);
+    }
+  }});
+  // half-sunk skiff out past the corner
+  const skiff = new THREE.Group();
+  const hull = new THREE.Mesh(new THREE.BoxGeometry(7, 1.6, 2.6), new THREE.MeshLambertMaterial({ color:0x6a5232 }));
+  hull.position.y = 0.4; hull.rotation.z = 0.14; skiff.add(hull);
+  skiff.position.set(ARENA.halfX+18, 0, -40); skiff.rotation.y = 0.7; marshScenery.add(skiff);
+})();
+
+// ---- DUCKS: flights cross the marsh sky; somebody in a blind lets fly; supper happens ----
+const ducks = [];
+let duckFlightT = 4, duckShotT = 0;
+const duckBodyM = new THREE.MeshLambertMaterial({ color:0x5a4a34 });
+const duckHeadM = new THREE.MeshLambertMaterial({ color:0x2a6a3a });   // drake green
+const duckBillM = new THREE.MeshLambertMaterial({ color:0xd8a83a });
+const duckWingM = new THREE.MeshLambertMaterial({ color:0x6a5a42, side:THREE.DoubleSide });
+function buildDuck(){
+  const d = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.55, 8, 6), duckBodyM);
+  body.scale.set(1.5, 0.9, 0.9); d.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 7, 6), duckHeadM);
+  head.position.set(0.85, 0.35, 0); d.add(head);
+  const bill = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.5, 5), duckBillM);
+  bill.rotation.z = -Math.PI/2; bill.position.set(1.25, 0.32, 0); d.add(bill);
+  const mkWing = s => {
+    const w = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.75), duckWingM);
+    w.position.x = -0.55;                              // pivot at the wing root
+    const piv = new THREE.Group(); piv.add(w);
+    piv.position.set(0.1, 0.15, s*0.4); piv.rotation.x = s*Math.PI/2;
+    d.add(piv); return piv;
+  };
+  d.userData.wL = mkWing(1); d.userData.wR = mkWing(-1);
+  return d;
+}
+function crack(){   // shotgun report: short hot noise burst
+  const ac = audio(); if(!ac) return;
+  const dur = 0.16, len = Math.floor(ac.sampleRate*dur), buf = ac.createBuffer(1, len, ac.sampleRate), d = buf.getChannelData(0);
+  for(let i=0;i<len;i++) d[i] = (Math.random()*2-1) * Math.pow(1 - i/len, 3.2);
+  const src = ac.createBufferSource(); src.buffer = buf;
+  const f = ac.createBiquadFilter(); f.type='highpass'; f.frequency.value = 900;
+  const g = ac.createGain(); g.gain.value = 0.4;
+  src.connect(f); f.connect(g); g.connect(masterGain); src.start();
+}
+function updateDucks(dt){
+  if(lobby.arena !== 3){
+    if(ducks.length){ for(const d of ducks) scene.remove(d.g); ducks.length = 0; }
+    return;
+  }
+  // spawn a flight now and again
+  duckFlightT -= dt;
+  if(duckFlightT <= 0){
+    duckFlightT = 9 + Math.random()*10;
+    const dir = Math.random()<0.5 ? 1 : -1;
+    const n = 3 + Math.floor(Math.random()*3);
+    const z0 = (Math.random()-0.5)*70, y0 = 24 + Math.random()*8, spd = 16 + Math.random()*8;
+    for(let i=0;i<n;i++){
+      const g = buildDuck();
+      g.scale.setScalar(1.5);
+      // trailing V formation
+      g.position.set(-dir*(ARENA.halfX+55) - dir*i*4, y0 + (i%2)*1.2, z0 + (i - n/2)*4.5*(i%2?1:-1)*0.5 + i*2);
+      g.rotation.y = dir>0 ? Math.PI/2 : -Math.PI/2;
+      if(dir<0) g.rotation.y = -Math.PI/2;
+      scene.add(g);
+      ducks.push({ g, vx: dir*spd, dead:false, spin:0, flap: Math.random()*7 });
+    }
+  }
+  // somebody's shootin'
+  duckShotT -= dt;
+  const overhead = ducks.filter(d=>!d.dead && Math.abs(d.g.position.x) < ARENA.halfX+20);
+  if(duckShotT <= 0 && overhead.length){
+    duckShotT = 1.2 + Math.random()*2.4;
+    crack();
+    if(Math.random() < 0.55){                          // hit! feathers n' physics
+      const d = pick(overhead);
+      d.dead = true; d.spin = (Math.random()<0.5?-1:1) * (6+Math.random()*5);
+      for(let k=0;k<14;k++) spawnPart(d.g.position.x, d.g.position.y, d.g.position.z,
+        (Math.random()-0.5)*8, (Math.random()-0.5)*6, (Math.random()-0.5)*8,
+        Math.random()<0.5?0xf0ead8:0x8a7a5a, 0.35+Math.random()*0.25, 0.9);
+      if(Math.random()<0.3) chatMsg('PA', 1, pick(["THAT'S SUPPER!","GOT 'IM!","PULL!... wait","RIGHT IN THE GIBLETS!"]));
+    }
+  }
+  const t = performance.now()/1000;
+  for(let i=ducks.length-1;i>=0;i--){
+    const d = ducks[i];
+    if(d.dead){
+      d.vy = (d.vy===undefined ? 2 : d.vy) - 30*dt;    // little pop up, then down she comes
+      d.g.position.y += d.vy*dt;
+      d.g.position.x += d.vx*0.25*dt;
+      d.g.rotation.z += d.spin*dt;
+      if(d.g.position.y <= 0.6){                       // splashdown
+        for(let k=0;k<10;k++) spawnPart(d.g.position.x, 0.5, d.g.position.z,
+          (Math.random()-0.5)*7, 2+Math.random()*4, (Math.random()-0.5)*7, 0x9fc4b8, 0.4, 0.8);
+        scene.remove(d.g); ducks.splice(i,1); continue;
+      }
+    } else {
+      d.g.position.x += d.vx*dt;
+      d.g.position.y += Math.sin(t*2+d.flap)*0.5*dt;
+      const fl = Math.sin(t*11 + d.flap) * 0.85;       // wingbeat
+      d.g.userData.wL.rotation.z = fl; d.g.userData.wR.rotation.z = -fl;
+      if(Math.abs(d.g.position.x) > ARENA.halfX+70){ scene.remove(d.g); ducks.splice(i,1); }
+    }
+  }
+}
+
+// venue looks: fog + light tint + floor surface + weather + which scenery stands
 const ARENA_LOOKS = [
-  { fog:0x46283c, near:200, far:460, sky:0xbb7a99, ground:0x2a1d0d, sunC:0xffb070, sunI:1.15, map:()=>fieldTex, weather:'off' },
-  { fog:0x2c3c50, near:170, far:430, sky:0x9fc4e8, ground:0x24303c, sunC:0xcfe4ff, sunI:1.0,  map:()=>iceTex,  weather:'snow' },
-  { fog:0x25301e, near:140, far:400, sky:0x7a9a6a, ground:0x1a1608, sunC:0xd8e89a, sunI:0.8,  map:()=>bogTex,  weather:'fireflies' },
+  { fog:0x46283c, near:200, far:460, sky:0xbb7a99, ground:0x2a1d0d, sunC:0xffb070, sunI:1.15, map:()=>fieldTex, weather:'off',       shell:true,  bog:false, marsh:false },
+  { fog:0x2c3c50, near:170, far:430, sky:0x9fc4e8, ground:0x24303c, sunC:0xcfe4ff, sunI:1.0,  map:()=>iceTex,   weather:'snow',      shell:true,  bog:false, marsh:false },
+  { fog:0x25301e, near:150, far:430, sky:0x7a9a6a, ground:0x1a1608, sunC:0xd8e89a, sunI:0.85, map:()=>bogTex,   weather:'fireflies', shell:false, bog:true,  marsh:false },
+  { fog:0x8a94a0, near:180, far:470, sky:0xc8d4e0, ground:0x3a4434, sunC:0xffd9a0, sunI:1.05, map:()=>marshTex, weather:'off',       shell:false, bog:false, marsh:true },
 ];
 function applyArena(i){
   const L = ARENA_LOOKS[i] || ARENA_LOOKS[0];
@@ -5292,6 +5545,9 @@ function applyArena(i){
   if(hemi.color && hemi.color.setHex){ hemi.color.setHex(L.sky); hemi.groundColor.setHex(L.ground); }
   if(sun.color && sun.color.setHex){ sun.color.setHex(L.sunC); sun.intensity = L.sunI; }
   if(floor.material){ floor.material.map = L.map(); floor.material.needsUpdate = true; }
+  barnShell.visible = L.shell;
+  bogScenery.visible = L.bog;
+  marshScenery.visible = L.marsh;
   setWeather(L.weather);
 }
 
@@ -5305,16 +5561,19 @@ scene.add(mud);
 
 // ---- barn shell: plank side walls (behind the crowd), gable roof & rafters ----
 // (physics uses ARENA bounds, not these meshes — walls are purely the barn we play inside)
+// Grouped so outdoor venues (bog, marsh) can hide the whole barn and play under open sky.
+const barnShell = new THREE.Group();
+scene.add(barnShell);
 const plankMat = new THREE.MeshLambertMaterial({ map: barnPlankTex, side:THREE.DoubleSide });
 const beamMat  = new THREE.MeshLambertMaterial({ color:0x3a2817 });
 const SHELL_X = ARENA.halfX + 8, SHELL_Z = ARENA.halfZ + 30, EAVE_H = 42, RIDGE = 60;
 // long plank walls, set back behind the hay-bale boards + crowd
 [1,-1].forEach(side=>{
   const wl = new THREE.Mesh(new THREE.PlaneGeometry(SHELL_X*2, EAVE_H), plankMat);
-  wl.position.set(0, EAVE_H/2, side*SHELL_Z); wl.rotation.y = side>0?Math.PI:0; scene.add(wl);
+  wl.position.set(0, EAVE_H/2, side*SHELL_Z); wl.rotation.y = side>0?Math.PI:0; barnShell.add(wl);
   // hay loft window up high
   const loft = new THREE.Mesh(new THREE.BoxGeometry(10, 8, 0.6), new THREE.MeshLambertMaterial({color:0x140d07}));
-  loft.position.set(0, EAVE_H-8, side*(SHELL_Z-0.4)); scene.add(loft);
+  loft.position.set(0, EAVE_H-8, side*(SHELL_Z-0.4)); barnShell.add(loft);
 });
 // gable roof: two long slopes meeting at the ridge (dark underside, seen from inside)
 {
@@ -5325,16 +5584,16 @@ const SHELL_X = ARENA.halfX + 8, SHELL_Z = ARENA.halfZ + 30, EAVE_H = 42, RIDGE 
     const rf = new THREE.Mesh(new THREE.PlaneGeometry(SHELL_X*2, slope), roofMat);
     rf.position.set(0, (EAVE_H+RIDGE)/2, side*SHELL_Z/2);
     rf.rotation.x = -Math.PI/2 - side*tilt;
-    scene.add(rf);
+    barnShell.add(rf);
   });
   const ridge = new THREE.Mesh(new THREE.BoxGeometry(SHELL_X*2, 1.4, 1.4), beamMat);
-  ridge.position.set(0, RIDGE, 0); scene.add(ridge);
+  ridge.position.set(0, RIDGE, 0); barnShell.add(ridge);
   // cross tie-beams + king posts (rafters overhead)
   for(let x=-SHELL_X+10; x<=SHELL_X-10; x+=20){
     const beam = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, SHELL_Z*2), beamMat);
-    beam.position.set(x, EAVE_H+1.5, 0); scene.add(beam);
+    beam.position.set(x, EAVE_H+1.5, 0); barnShell.add(beam);
     const kp = new THREE.Mesh(new THREE.BoxGeometry(0.8, rise, 0.8), beamMat);
-    kp.position.set(x, EAVE_H+rise/2, 0); scene.add(kp);
+    kp.position.set(x, EAVE_H+rise/2, 0); barnShell.add(kp);
   }
 }
 
@@ -5462,18 +5721,18 @@ let crowdHype = 0, crowdT = 0;
     }
   });
 
-  // work-lights strung from the rafters
+  // work-lights strung from the rafters (part of the barn shell — outdoor venues lose 'em)
   [[-42,-24],[42,-24],[-42,24],[42,24]].forEach(([x,z])=>{
     const cord=new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.06,10,4), new THREE.MeshLambertMaterial({color:0x1a1a1a}));
-    cord.position.set(x,35,z); scene.add(cord);
+    cord.position.set(x,35,z); barnShell.add(cord);
     const shade=new THREE.Mesh(new THREE.ConeGeometry(1.7,1.5,12), new THREE.MeshLambertMaterial({color:0x2b2b2b, side:THREE.DoubleSide}));
-    shade.position.set(x,30,z); scene.add(shade);
+    shade.position.set(x,30,z); barnShell.add(shade);
     const bulb=new THREE.Mesh(new THREE.SphereGeometry(0.6,8,6), new THREE.MeshBasicMaterial({color:0xffe9a0}));
-    bulb.position.set(x,29.2,z); scene.add(bulb);
+    bulb.position.set(x,29.2,z); barnShell.add(bulb);
     // volumetric-ish warm light shaft (additive, faint)
     const ray=new THREE.Mesh(new THREE.ConeGeometry(6.5,28,16,1,true),
       new THREE.MeshBasicMaterial({ color:0xffdf9a, transparent:true, opacity:0.055, blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide }));
-    ray.position.set(x,15,z); scene.add(ray);
+    ray.position.set(x,15,z); barnShell.add(ray);
   });
 
   // yard junk
@@ -7205,6 +7464,7 @@ function animate(){
   updateCrowd(dt);
   updateDust(dt);
   updateWeather(dt);
+  updateDucks(dt);
   updateCamera(dt);
   renderer.render(scene, camera);
 }

@@ -171,7 +171,8 @@ if(camPos.x > 82+26-2.4) throw new Error('camera punched out the back of the goa
 if(Math.abs(camPos.z) > 15-1.4 || camPos.y > 12-1.4) throw new Error('camera clipped out of the goal recess');
 
 // arena test: each venue swaps surface physics but a clean shot still scores and stays in bounds
-for(const ai of [1, 2]){
+// (arena 3 = Mallard Marsh also exercises the duck flights + shotgun path headlessly)
+for(const ai of [1, 2, 3]){
   lobby.arena = ai;
   game.state='lobby'; startMatch(false);
   for(let i=0;i<60*20 && game.state!=='play';i++) frame();
