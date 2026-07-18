@@ -1,6 +1,19 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-18 iter 26 — full per-venue theming: no more hay bales or half-barns outdoors, per user request]
+- The bale boards, crowd perches, and barn-door goal facades were shared across venues — the marsh
+  had hay bales on the sides and floating half-barn ends. Now each is a themed, toggleable set at
+  the SAME positions (crowd never moves; physics untouched):
+  - boards: hay bales (barn/pond) / stacked deadfall logs with moss caps (bog) / low driftwood line
+    with reeds sproutin' through (marsh).
+  - crowd perches: bale / big mossy stump / stilted plank dock.
+  - goals: every venue keeps the timber mouth + team-color header + dark recess (the goal read),
+    but the barn end-wall + gable + swung-open door leaves only stand in barn/pond. Bog gets a
+    hollow-cypress frame (log posts/lintel + moss swags); marsh gets a duck-blind goal (camo posts,
+    grass-thatch header with hangin' fringe, reed tufts).
+  - outer ground tints per venue (marsh sits in water-green shallows, bog in black muck).
+- Barn + Frozen Pond are pixel-identical to before (pond still APPROVED).
 [2026-07-18 iter 25 — bog goes open-air + MALLARD MARSH duck-hunt arena, per user request]
 - Skeeter Bog no longer looks like it's in the barn: the whole barn shell (side walls, loft windows,
   roof, rafters, work-lights) is now a toggleable group; outdoor venues hide it and play under the
@@ -5529,12 +5542,12 @@ function updateDucks(dt){
   }
 }
 
-// venue looks: fog + light tint + floor surface + weather + which scenery stands
+// venue looks: fog + light tint + floor surface + weather + which scenery/boards/goal dressing stands
 const ARENA_LOOKS = [
-  { fog:0x46283c, near:200, far:460, sky:0xbb7a99, ground:0x2a1d0d, sunC:0xffb070, sunI:1.15, map:()=>fieldTex, weather:'off',       shell:true,  bog:false, marsh:false },
-  { fog:0x2c3c50, near:170, far:430, sky:0x9fc4e8, ground:0x24303c, sunC:0xcfe4ff, sunI:1.0,  map:()=>iceTex,   weather:'snow',      shell:true,  bog:false, marsh:false },
-  { fog:0x25301e, near:150, far:430, sky:0x7a9a6a, ground:0x1a1608, sunC:0xd8e89a, sunI:0.85, map:()=>bogTex,   weather:'fireflies', shell:false, bog:true,  marsh:false },
-  { fog:0x8a94a0, near:180, far:470, sky:0xc8d4e0, ground:0x3a4434, sunC:0xffd9a0, sunI:1.05, map:()=>marshTex, weather:'off',       shell:false, bog:false, marsh:true },
+  { fog:0x46283c, near:200, far:460, sky:0xbb7a99, ground:0x2a1d0d, sunC:0xffb070, sunI:1.15, map:()=>fieldTex, weather:'off',       shell:true,  bog:false, marsh:false, boards:'barn',  outer:0x4a3a20 },
+  { fog:0x2c3c50, near:170, far:430, sky:0x9fc4e8, ground:0x24303c, sunC:0xcfe4ff, sunI:1.0,  map:()=>iceTex,   weather:'snow',      shell:true,  bog:false, marsh:false, boards:'barn',  outer:0x4a4438 },
+  { fog:0x25301e, near:150, far:430, sky:0x7a9a6a, ground:0x1a1608, sunC:0xd8e89a, sunI:0.85, map:()=>bogTex,   weather:'fireflies', shell:false, bog:true,  marsh:false, boards:'bog',   outer:0x2c2c1a },
+  { fog:0x8a94a0, near:180, far:470, sky:0xc8d4e0, ground:0x3a4434, sunC:0xffd9a0, sunI:1.05, map:()=>marshTex, weather:'off',       shell:false, bog:false, marsh:true,  boards:'marsh', outer:0x3a5548 },
 ];
 function applyArena(i){
   const L = ARENA_LOOKS[i] || ARENA_LOOKS[0];
@@ -5548,6 +5561,14 @@ function applyArena(i){
   barnShell.visible = L.shell;
   bogScenery.visible = L.bog;
   marshScenery.visible = L.marsh;
+  // themed boards + crowd perches + goal dressing (same spots, different wood)
+  barnBoards.visible = L.boards==='barn';
+  bogBoards.visible = L.boards==='bog';
+  marshBoards.visible = L.boards==='marsh';
+  goalBarnFacades.visible = L.boards==='barn';
+  goalBogDecor.visible = L.boards==='bog';
+  goalMarshDecor.visible = L.boards==='marsh';
+  if(mud.material && mud.material.color && mud.material.color.setHex) mud.material.color.setHex(L.outer);
   setWeather(L.weather);
 }
 
@@ -5598,23 +5619,31 @@ const SHELL_X = ARENA.halfX + 8, SHELL_Z = ARENA.halfZ + 30, EAVE_H = 42, RIDGE 
 }
 
 // the goals ARE the big barn doors at each end — the doorway is the goal mouth
+// The barn end-wall around each goal is its own group so outdoor venues can drop it — a floating
+// half-barn in a swamp read wrong. Every venue keeps the same timber mouth + recess (physics
+// unchanged); bog and marsh get their own decor around it instead.
+const goalBarnFacades = new THREE.Group();
+const goalBogDecor = new THREE.Group(); goalBogDecor.visible = false;
+const goalMarshDecor = new THREE.Group(); goalMarshDecor.visible = false;
+scene.add(goalBarnFacades); scene.add(goalBogDecor); scene.add(goalMarshDecor);
 function buildGoal(sx, color){
   const grp = new THREE.Group();
+  const facade = new THREE.Group();                              // barn-only dressing
   const trim   = new THREE.MeshLambertMaterial({ color });
   const timber = new THREE.MeshLambertMaterial({ color:0x4a3320 });
   const doorMat= new THREE.MeshLambertMaterial({ map: barnPlankTex });
   const white  = new THREE.MeshLambertMaterial({ color:0xe8e0d0 });
   const gw=ARENA.goalHalfW, gh=ARENA.goalH, WH=EAVE_H, SZ=SHELL_Z, RID=RIDGE;
-  const box=(w,h,d,mat,x,y,z)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat); m.position.set(x,y,z); grp.add(m); return m; };
+  const box=(w,h,d,mat,x,y,z,into)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat); m.position.set(x,y,z); (into||grp).add(m); return m; };
   // red plank end wall wrapping the doorway (thin boxes facing the pitch)
   const sideW = SZ - gw;
-  box(0.8, WH, sideW, doorMat, 0, WH/2,  gw+sideW/2);
-  box(0.8, WH, sideW, doorMat, 0, WH/2, -(gw+sideW/2));
-  box(0.8, WH-gh, gw*2, doorMat, 0, gh+(WH-gh)/2, 0);           // header panel above doorway
+  box(0.8, WH, sideW, doorMat, 0, WH/2,  gw+sideW/2, facade);
+  box(0.8, WH, sideW, doorMat, 0, WH/2, -(gw+sideW/2), facade);
+  box(0.8, WH-gh, gw*2, doorMat, 0, gh+(WH-gh)/2, 0, facade);   // header panel above doorway
   // gable peak: stacked shrinking planks climbing to the ridge
   const peakN=6, rise=RID-WH;
-  for(let i=0;i<peakN;i++){ const f=(i+0.5)/peakN; box(0.8, rise/peakN*1.05, SZ*2*(1-f), doorMat, 0, WH+(i+0.5)*rise/peakN, 0); }
-  // timber doorway frame + team-color header beam
+  for(let i=0;i<peakN;i++){ const f=(i+0.5)/peakN; box(0.8, rise/peakN*1.05, SZ*2*(1-f), doorMat, 0, WH+(i+0.5)*rise/peakN, 0, facade); }
+  // timber doorway frame + team-color header beam (every venue keeps these — it's the goal)
   [gw,-gw].forEach(z=>{ box(1.4, gh+1.2, 1.4, timber, 0, (gh+1.2)/2, z); });
   box(1.6, 1.5, gw*2+2.8, trim, 0, gh+0.6, 0);
   // two barn-door leaves swung wide open (white X-brace + team-color edge)
@@ -5626,15 +5655,56 @@ function buildGoal(sx, color){
     const edge=new THREE.Mesh(new THREE.BoxGeometry(0.55, gh, 0.7), trim); edge.position.z=-s*gw*0.42; leaf.add(edge);
     leaf.position.set(sx*3.2, gh/2, s*(gw+3.2));
     leaf.rotation.y = sx*s*0.6;
-    grp.add(leaf);
+    facade.add(leaf);
   });
-  // dark barn interior behind the doors = goal recess (keeps the goal read clear)
+  // dark interior behind the mouth = goal recess (keeps the goal read clear in every venue)
   const recess=new THREE.Mesh(
     new THREE.BoxGeometry(ARENA.goalDepth, gh, gw*2),
     new THREE.MeshLambertMaterial({ color:0x160f08, transparent:true, opacity:0.55, side:THREE.DoubleSide }));
   recess.position.set(sx*ARENA.goalDepth/2, gh/2, 0); grp.add(recess);
   grp.position.set(sx*ARENA.halfX, 0, 0);
-  scene.add(grp);
+  facade.position.copy(grp.position);
+  scene.add(grp); goalBarnFacades.add(facade);
+
+  // ---- bog goal decor: hollow-cypress mouth — big log posts, moss swags on the header ----
+  const bogD = new THREE.Group();
+  const logM = new THREE.MeshLambertMaterial({ color:0x4a3d28 });
+  const mossM = new THREE.MeshLambertMaterial({ color:0x5a6c3a });
+  [gw,-gw].forEach(z=>{
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 2.2, gh+4, 8), logM);
+    post.position.set(0, (gh+4)/2, z*1.06); bogD.add(post);
+  });
+  const lintel = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, gw*2+6, 8), logM);
+  lintel.rotation.x = Math.PI/2; lintel.position.set(0, gh+2, 0); bogD.add(lintel);
+  for(let i=0;i<7;i++){
+    const swagH = 2.2+Math.random()*2.4;
+    const swag = new THREE.Mesh(new THREE.BoxGeometry(0.6, swagH, 0.25), mossM);
+    swag.position.set(0, gh+1.4-swagH/2, -gw+2+i*(gw/3.5)); bogD.add(swag);
+  }
+  bogD.position.copy(grp.position); goalBogDecor.add(bogD);
+
+  // ---- marsh goal decor: duck-blind goal — grass thatch header, camo netting posts, reeds ----
+  const marshD = new THREE.Group();
+  const grassM = new THREE.MeshLambertMaterial({ color:0x8a9a5a });
+  const camoM = new THREE.MeshLambertMaterial({ color:0x55603a });
+  const reedM = new THREE.MeshLambertMaterial({ color:0x6a8a46 });
+  [gw,-gw].forEach(z=>{
+    const post = new THREE.Mesh(new THREE.BoxGeometry(1.6, gh+2.5, 1.6), camoM);
+    post.position.set(0, (gh+2.5)/2, z*1.05); marshD.add(post);
+    for(let k=0;k<4;k++){                                     // reed tufts at each post foot
+      const hgt = 2.6+Math.random()*1.8;
+      const st = new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.11,hgt,4), reedM);
+      st.position.set((Math.random()-0.5)*2.4, hgt/2, z + (Math.random()-0.5)*3);
+      st.rotation.z = (Math.random()-0.5)*0.3; marshD.add(st);
+    }
+  });
+  const thatch = new THREE.Mesh(new THREE.BoxGeometry(3.4, 1.6, gw*2+4), grassM);
+  thatch.position.set(0, gh+1.5, 0); thatch.rotation.z = sx*0.06; marshD.add(thatch);
+  for(let i=0;i<9;i++){                                       // grass fringe hangin' off the header
+    const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.4, 1.8+Math.random(), 5), grassM);
+    tuft.position.set(sx*-1.2, gh+0.4, -gw+1.5+i*(gw/4.2)); tuft.rotation.x = Math.PI; marshD.add(tuft);
+  }
+  marshD.position.copy(grp.position); goalMarshDecor.add(marshD);
 }
 buildGoal(-1, 0x4fa3ff); // blue defends -X
 buildGoal( 1, 0xff6a4f); // red defends +X
@@ -5679,19 +5749,70 @@ billboard("TRUCK NUTS: BUY 2 GET 1 FREE", 40, -ARENA.halfZ-18, 0, '#2a4a1a', '#f
 // ---------------- STADIUM DRESSIN' ----------------
 const crowdFolks = [], critterFolks = [], deadFolks = [];
 let crowdHype = 0, crowdT = 0;
+// The boards + crowd seating come in a themed flavor per venue: hay bales for the barn arenas,
+// mossy deadfall logs for the bog, driftwood + reed banks + plank docks for the marsh.
+// Same positions everywhere (the crowd doesn't move) — applyArena flips which set stands.
+const barnBoards = new THREE.Group();
+const bogBoards = new THREE.Group(); bogBoards.visible = false;
+const marshBoards = new THREE.Group(); marshBoards.visible = false;
+scene.add(barnBoards); scene.add(bogBoards); scene.add(marshBoards);
 (function stadium(){
   const wood = new THREE.MeshLambertMaterial({ color:0x6b4a26 });
   const plaid = [0xa03030, 0x30702a, 0x2a4a8a, 0xa07030, 0x707070, 0x8a3a8a, 0xc0c0c0];
   const skins = [0xd9a066, 0xc98a5a, 0xe8b880];
+  const bogLogM   = new THREE.MeshLambertMaterial({ color:0x4a3d28 });
+  const bogMossM  = new THREE.MeshLambertMaterial({ color:0x5a6c3a });
+  const driftM    = new THREE.MeshLambertMaterial({ color:0x9a8a6e });
+  const reedM     = new THREE.MeshLambertMaterial({ color:0x6a8a46 });
+  const plankM    = new THREE.MeshLambertMaterial({ color:0x8a7048 });
+  const postM     = new THREE.MeshLambertMaterial({ color:0x5a4630 });
+  function log(mat, x, y, z, r, len){
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 9), mat);
+    m.rotation.z = Math.PI/2; m.position.set(x, y, z); m.castShadow = true;
+    return m;
+  }
 
-  // hay-bale boards lining both long sides (these are the "boards")
+  // boards lining both long sides (per-venue flavor, same line)
   [1,-1].forEach(side=>{
     const z0 = side*(ARENA.halfZ+2.8);
+    // barn + pond: the hay bales
     for(let x=-ARENA.halfX+2; x<=ARENA.halfX-2; x+=4.8){
-      scene.add(hayBale(x, 2.4, z0, true));
-      if(Math.random()<0.5) scene.add(hayBale(x+(Math.random()-0.5), 7.0, z0, true));   // stacked second row
+      barnBoards.add(hayBale(x, 2.4, z0, true));
+      if(Math.random()<0.5) barnBoards.add(hayBale(x+(Math.random()-0.5), 7.0, z0, true));   // stacked second row
+    }
+    // bog: deadfall log wall, moss on top
+    for(let x=-ARENA.halfX+7; x<=ARENA.halfX-4; x+=13){
+      bogBoards.add(log(bogLogM, x+(Math.random()-0.5)*2, 1.4, z0, 1.4, 13.5));
+      if(Math.random()<0.7) bogBoards.add(log(bogLogM, x+(Math.random()-0.5)*3, 3.8, z0+(Math.random()-0.5), 1.15, 11));
+      const moss = new THREE.Mesh(new THREE.BoxGeometry(6+Math.random()*4, 0.5, 2.2), bogMossM);
+      moss.position.set(x, 4.8, z0); bogBoards.add(moss);
+    }
+    // marsh: low driftwood line with reed clumps sprouting through
+    for(let x=-ARENA.halfX+6; x<=ARENA.halfX-4; x+=11){
+      marshBoards.add(log(driftM, x+(Math.random()-0.5)*2, 1.1, z0+(Math.random()-0.5), 1.05, 10.5));
+      if(Math.random()<0.5) marshBoards.add(log(driftM, x+2, 2.6, z0, 0.8, 7.5));
+      for(let k=0;k<5;k++){
+        const hgt = 3.2+Math.random()*2;
+        const st = new THREE.Mesh(new THREE.CylinderGeometry(0.07,0.1,hgt,4), reedM);
+        st.position.set(x-4+Math.random()*8, hgt/2, z0+(Math.random()-0.5)*2.4);
+        st.rotation.z = (Math.random()-0.5)*0.25; marshBoards.add(st);
+      }
     }
   });
+  // per-venue crowd perches (built in the crowd loop below at each hick's spot)
+  function crowdPerch(x, z){
+    barnBoards.add(hayBale(x, 2.4, z, true));                            // barn/pond: the classic bale
+    const stump = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.9, 3.5, 9), bogLogM);
+    stump.position.set(x, 1.75, z); stump.castShadow = true; bogBoards.add(stump);   // bog: big ol' stump
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 0.18, 9), bogMossM);
+    cap.position.set(x, 3.55, z); bogBoards.add(cap);
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.4, 3.2), plankM);       // marsh: stilted dock
+    deck.position.set(x, 3.4, z); deck.castShadow = true; marshBoards.add(deck);
+    [[-1.7,-1.2],[1.7,-1.2],[-1.7,1.2],[1.7,1.2]].forEach(([px,pz])=>{
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 3.4, 5), postM);
+      post.position.set(x+px, 1.7, z+pz); marshBoards.add(post);
+    });
+  }
 
   // spectators: hillbillies perched on hay bales + barnyard critters, both sides
   const critters = ['cow','pig','chicken','goat','chicken','pig','cow'];
@@ -5699,7 +5820,7 @@ let crowdHype = 0, crowdT = 0;
     for(let i=0;i<11;i++){
       const x = -ARENA.halfX+9 + i*((ARENA.halfX*2-18)/10);
       const z = side*(ARENA.halfZ + 10 + (i%2)*3.5);
-      scene.add(hayBale(x, 2.4, z, true));                    // a bale to sit on
+      crowdPerch(x, z);                                       // themed seat: bale / stump / dock
       const hick = makeHick();
       const baseY = 4.0;
       hick.position.set(x, baseY, z);
