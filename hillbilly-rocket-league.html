@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-19 iter 30 — AAA pass 4: ball-strike impact FX + supersonic streaks]
+- The game's most frequent event — hitting the ball — finally has contact feedback: burlap flecks
+  spray from the strike point (count/size/speed scale with impact), hits over 20 add amber glow
+  sparks, and every solid hit gets a whack (thump scaled to impact). Was completely silent/invisible.
+- Supersonic cars peel white-hot streaks off the body (glow pool, ~0.8/frame) — you can SEE
+  supersonic now, not just read it on the speedo.
 [2026-07-18 iter 29 — AAA pass 3: results screen + airborne landing ring]
 - Match-end is a real results screen now: blurred-glass overlay, final score line, and an animated
   stat CARD — Hand / Goals / Demos / Touches per player, team-colored names, "(you)" marker, and a
@@ -7127,8 +7133,15 @@ function updateCar(c, dt, input){
   }
   const sw = c.mesh.userData.steerWheel;
   if(sw) sw.rotation.y = c.steerVis * 1.6;
-  // tire kickup — mud & grass flung from the rear when movin' fast
+  // supersonic: white-hot streaks peel off the body
   const kspd = Math.hypot(c.vel.x, c.vel.z);
+  if(kspd > SUPERSONIC && Math.random() < 0.8){
+    const sf = carForward(c);
+    spawnGlow(c.pos.x - sf.x*2.5, 1.1 + Math.random()*1.6, c.pos.z - sf.z*2.5,
+      -sf.x*(16+Math.random()*9), (Math.random()-0.3)*3, -sf.z*(16+Math.random()*9),
+      Math.random()<0.5 ? 0xffffff : 0xffe9a0, 0.28, 1.1, 0);
+  }
+  // tire kickup — mud & grass flung from the rear when movin' fast
   if(c.onGround && kspd > 20 && Math.random() < 0.7){
     const fwd = carForward(c);
     const rx = c.pos.x - fwd.x*2.2*c.veh.scale, rz = c.pos.z - fwd.z*2.2*c.veh.scale;
@@ -7265,6 +7278,19 @@ function carBallCollide(c, dt){
     // car recoil
     c.vel.addScaledVector(n, -impact*0.25);
     if(impact>3){ ball.lastTouch = c; c.touches++; }
+    // contact feedback — burlap flecks n' amber sparks off the strike point, whack scaled to the hit
+    if(impact > 6){
+      const cx = ball.pos.x - n.x*BALL_R, cy = ball.pos.y - n.y*BALL_R, cz = ball.pos.z - n.z*BALL_R;
+      const k = Math.min(1, impact/45);
+      const nP = 4 + Math.floor(k*10);
+      for(let i=0;i<nP;i++) spawnPart(cx, cy, cz,
+        n.x*9 + (Math.random()-0.5)*10, 3 + Math.random()*7*k + impact*0.08, n.z*9 + (Math.random()-0.5)*10,
+        Math.random()<0.6 ? 0xc9ad72 : 0x8a6a3a, 0.3 + k*0.3, 0.5 + k*0.5);
+      if(impact > 20) for(let i=0;i<6;i++) spawnGlow(cx, cy, cz,
+        (Math.random()-0.5)*20, 4 + Math.random()*9, (Math.random()-0.5)*20,
+        0xffd23e, 0.3, 0.4 + k*0.9, -8);
+      thump(k*0.8);
+    }
     // a real wallop off the player's own bumper gets a frame of hitstop — sells the contact
     if(c.isPlayer && impact > 34) hitstop = Math.max(hitstop, 0.045);
     // "WHAT A SAVE" — defender clears a ball that was headin' for his own net
