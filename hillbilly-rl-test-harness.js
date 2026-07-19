@@ -132,10 +132,11 @@ runFrames(120);
 // TEST A: direct shot into +X goal (clear the field first)
 for(let i=0;i<60*20 && game.state!=='play';i++) frame();
 for(const c of cars){ c.pos.set(-70+Math.random()*6, 0, -40+Math.random()*6); c.vel.set(0,0,0); }
+const preA = game.score[0];   // bots can sneak an organic goal in before this — assert the DELTA
 ball.pos.set(70, 5, 0); ball.vel.set(85, 0, 0);
 runFrames(30);
 console.log('TEST A — score after shot:', game.score, 'state:', game.state);
-if(game.score[0] !== 1) throw new Error('direct shot did not score');
+if(game.score[0] !== preA + 1) throw new Error('direct shot did not score (pre='+preA+')');
 runFrames(60*5);
 console.log('state after goal reset:', game.state);
 
@@ -149,7 +150,9 @@ for(let i=0;i<8;i++) frame();
 fakePad.buttons[7].value=0; fakePad.buttons[7].pressed=false; fakePad.buttons[1].pressed=false;
 console.log('demolition test — bot dead:', dbot.dead>0);
 if(!(dbot.dead>0)) throw new Error('demolition did not trigger');
-for(let i=0;i<60*4;i++) frame();
+// dead-timer only ticks while cars update, which pauses through goal celebrations —
+// wait UNTIL respawn (up to 15s) instead of a fixed 4s that a goal can eat into
+for(let i=0;i<60*15 && !(dbot.dead<=0 && dbot.mesh.visible);i++) frame();
 if(!(dbot.dead<=0 && dbot.mesh.visible)) throw new Error('respawn failed');
 console.log('respawn OK');
 
@@ -177,10 +180,11 @@ for(const ai of [1, 2, 3]){
   game.state='lobby'; startMatch(false);
   for(let i=0;i<60*20 && game.state!=='play';i++) frame();
   for(const c of cars){ c.pos.set(-70+Math.random()*6, 0, -40+Math.random()*6); c.vel.set(0,0,0); }
+  const preS = game.score[0];
   ball.pos.set(70, 5, 0); ball.vel.set(85, 0, 0);
   runFrames(45);
   console.log('arena', ai, 'shot test — score:', game.score, 'state:', game.state);
-  if(game.score[0] !== 1) throw new Error('arena '+ai+' shot did not score');
+  if(game.score[0] !== preS + 1) throw new Error('arena '+ai+' shot did not score (pre='+preS+')');
   runFrames(60*3);
   if(Math.abs(ball.pos.x) > 100 || Math.abs(ball.pos.z) > 60) throw new Error('arena '+ai+': ball escaped');
 }
@@ -192,7 +196,9 @@ for(let i=0;i<60*20 && game.state!=='play';i++) frame();
 const before = game.score[0]+game.score[1];
 runFrames(60*240);
 console.log('TEST B — organic goals:', (game.score[0]+game.score[1])-before, 'score:', game.score, 'state:', game.state);
-runFrames(60*120);
+// the clock freezes through every goal celebration + countdown, so high-scoring bot runs need
+// more wall-frames — wait UNTIL the match resolves (cap 5 min of frames) instead of a fixed 2
+for(let i=0;i<60*300 && game.state!=='end' && !game.overtime;i++) frame();
 console.log('TEST C — state:', game.state, 'timeLeft:', game.timeLeft.toFixed(1), 'overtime:', game.overtime);
 if(game.state!=='end' && !game.overtime) throw new Error('match never ended');
 if(Math.abs(ball.pos.x) > 100 || Math.abs(ball.pos.z) > 60) throw new Error('ball escaped arena');

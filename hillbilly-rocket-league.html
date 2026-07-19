@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-18 iter 29 — AAA pass 3: results screen + airborne landing ring]
+- Match-end is a real results screen now: blurred-glass overlay, final score line, and an animated
+  stat CARD — Hand / Goals / Demos / Touches per player, team-colored names, "(you)" marker, and a
+  TOP HOG badge on the MVP row (goals, then demos, then touches). Demos are now tracked per car.
+- Airborne ball gets an amber landing ring on the turf (additive, pulsing, grows/brightens with
+  height) so aerials and clears are readable at a glance — distinct from the ball's cast shadow.
 [2026-07-18 iter 28 — AAA pass 2: kickoff cinematic, HUD glass, pickup pops; ACES tried + reverted]
 - Kickoff cinematic: every kickoff parks the camera high over midfield and GLIDES it down behind
   yer car across the countdown (slower camera rates during 'countdown' only — gameplay stiffness
@@ -399,8 +405,22 @@ STILL TO DO (ideas for future iterations):
   /* ---------- END / PAUSE ---------- */
   #overlay-screen {
     position:absolute; inset:0; z-index:30; display:none; align-items:center; justify-content:center; flex-direction:column;
-    background:rgba(10,6,2,.82); color:#f2e2c4; text-align:center;
+    background:rgba(10,6,2,.72); color:#f2e2c4; text-align:center;
+    backdrop-filter:blur(7px); -webkit-backdrop-filter:blur(7px);
   }
+  #stats-card {
+    margin:14px auto 4px; padding:14px 22px; border-radius:14px; border:1px solid rgba(255,179,71,.35);
+    background:rgba(21,14,6,.72); display:inline-block; text-align:left; min-width:420px;
+    animation:cardUp .4s cubic-bezier(.2,1.4,.4,1);
+  }
+  @keyframes cardUp { from { transform:translateY(26px); opacity:0; } to { transform:none; opacity:1; } }
+  #stats-card table { border-collapse:collapse; width:100%; font-size:15px; }
+  #stats-card th { font-size:10px; text-transform:uppercase; letter-spacing:2px; color:#9c8358; text-align:right; padding:2px 10px; }
+  #stats-card th:first-child { text-align:left; }
+  #stats-card td { padding:4px 10px; text-align:right; border-top:1px solid rgba(255,179,71,.12); }
+  #stats-card td:first-child { text-align:left; font-weight:bold; }
+  #stats-card tr.mvp td { background:rgba(255,179,71,.10); }
+  .mvp-tag { font-size:10px; background:#ffb347; color:#3a2205; border-radius:4px; padding:1px 6px; margin-left:8px; letter-spacing:1px; vertical-align:middle; }
   #overlay-title { font-size:min(9vw,64px); font-weight:bold; color:#ffb347; text-shadow:4px 4px 0 #000; margin-bottom:8px; }
   #overlay-sub { font-size:20px; color:#c9a15f; margin-bottom:30px; max-width:700px; padding:0 20px; }
   .ov-btn { pointer-events:auto; font-size:20px; padding:12px 34px; margin:6px; border-radius:10px; border:2px solid #ffb347; background:#3a2810; color:#ffd98a; cursor:pointer; font-family:inherit; }
@@ -6100,6 +6120,17 @@ const ballTex = makeCanvasTex(256,256,(g,w,h)=>{
 const ballMesh = new THREE.Mesh(new THREE.SphereGeometry(BALL_R, 24, 18), new THREE.MeshLambertMaterial({ map: ballTex }));
 ballMesh.castShadow = true;
 scene.add(ballMesh);
+// landing ring: marks the spot under an airborne ball so aerials are readable (RL-style)
+const ringTex = makeCanvasTex(128,128,(g,w,h)=>{
+  g.strokeStyle='rgba(255,190,80,1)'; g.lineWidth=10;
+  g.beginPath(); g.arc(w/2,h/2,48,0,7); g.stroke();
+  g.strokeStyle='rgba(255,230,160,0.7)'; g.lineWidth=4;
+  g.beginPath(); g.arc(w/2,h/2,32,0,7); g.stroke();
+});
+const landRing = new THREE.Mesh(new THREE.PlaneGeometry(8,8),
+  new THREE.MeshBasicMaterial({ map:ringTex, transparent:true, opacity:0.5, depthWrite:false, blending:THREE.AdditiveBlending }));
+landRing.rotation.x = -Math.PI/2; landRing.visible = false; landRing.renderOrder = 2;
+scene.add(landRing);
 // criss-cross twine holding the sack together (rolls with the ball)
 {
   const twineMat = new THREE.MeshLambertMaterial({ color:0xb98f4a });
@@ -6739,7 +6770,7 @@ function makeCar(name, team, vehIdx, isPlayer){
     smokeT: 0, dead: 0,
     pos:new THREE.Vector3(), vel:new THREE.Vector3(), yaw:0,
     onGround:true, jumps:2, boost:33, flip:0, flipDir:0, pitchVis:0, rollVis:0, steerVis:0,
-    aiTimer:Math.random()*2, aiJumpCd:0, demoted:0, goals:0, touches:0,
+    aiTimer:Math.random()*2, aiJumpCd:0, demoted:0, goals:0, touches:0, demos:0,
   };
   cars.push(car);
   return car;
@@ -7200,6 +7231,16 @@ function updateBall(dt){
   // roll visual
   ballMesh.rotation.x += ball.vel.z*dt/BALL_R;
   ballMesh.rotation.z -= ball.vel.x*dt/BALL_R;
+  // landing ring under an airborne ball — grows and brightens with height
+  const airH = ball.pos.y - BALL_R;
+  landRing.visible = airH > 2.5;
+  if(landRing.visible){
+    landRing.position.set(ball.pos.x, 0.08, ball.pos.z);
+    const pulse = 1 + Math.sin(performance.now()/180)*0.06;
+    const rs = (0.8 + airH*0.05) * pulse;
+    landRing.scale.set(rs, rs, 1);
+    landRing.material.opacity = Math.min(0.75, 0.25 + airH*0.022);
+  }
 }
 
 let lastSaveMs = -1e9;
@@ -7255,6 +7296,7 @@ function carBallCollide(c, dt){
 
 function demolish(victim, culprit){
   victim.dead = 3;
+  culprit.demos++;
   victim.mesh.visible = false; victim.tag.visible = false;
   burst(new THREE.Vector3(victim.pos.x, victim.pos.y+2, victim.pos.z), 0xff5522, 45, 22);
   hitstop = Math.max(hitstop, 0.08);          // let the wreck land
@@ -7468,18 +7510,19 @@ function endMatch(){
   const eb = won ? 'win' : 'lose';
   const ei = Math.floor(Math.random()*LINES[eb].length);
   const endLine = LINES[eb][ei];
-  // stat sheet + Top Hog
-  const sorted = cars.slice().sort((a,b)=> b.goals-a.goals || b.touches-a.touches);
+  // results card: full stat table, Top Hog highlighted
+  const sorted = cars.slice().sort((a,b)=> b.goals-a.goals || b.demos-a.demos || b.touches-a.touches);
   const mvp = sorted[0];
-  const stats = sorted.map(c=>{
+  const rows = sorted.map(c=>{
     const col = c.team===0 ? '#6fb3ff' : '#ff8a6f';
-    return `<span style="color:${col}">${c.name}</span>: ${c.goals} goal${c.goals===1?'':'s'}, ${c.touches} touches`;
-  }).join(' &nbsp;·&nbsp; ');
+    const tag = c===mvp ? '<span class="mvp-tag">🐷 TOP HOG</span>' : '';
+    return `<tr${c===mvp?' class="mvp"':''}><td style="color:${col}">${c.name}${c.isPlayer?' (you)':''}${tag}</td>`+
+      `<td>${c.goals}</td><td>${c.demos}</td><td>${c.touches}</td></tr>`;
+  }).join('');
   document.getElementById('overlay-sub').innerHTML =
     endLine +
-    `<br><br>Final: Moonshiners ${game.score[0]} — Roadkill ${game.score[1]}` +
-    `<br>🐷 TOP HOG: <b>${mvp.name}</b> (${mvp.goals} goals, ${mvp.touches} touches)` +
-    `<br><span style="font-size:14px">${stats}</span>`;
+    `<br><br><b style="font-size:24px">Moonshiners ${game.score[0]} — ${game.score[1]} Roadkill</b>` +
+    `<div id="stats-card"><table><tr><th>Hand</th><th>Goals</th><th>Demos</th><th>Touches</th></tr>${rows}</table></div>`;
   playSample('sfx:whistle', 0.85);                 // full-time whistle
   setTimeout(()=>playVox(eb), 700);
   if(won){ banjoLick(); crowdCheer(2.5); } else sadTrombone();
