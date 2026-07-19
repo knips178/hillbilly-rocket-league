@@ -1,6 +1,20 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-18 iter 27 — AAA pass: game feel, cinematic menu, audio beds, sharper render]
+- GAME FEEL: hitstop freeze-frames on demolitions (0.08s), goals (0.06s), and the player's own
+  big ball strikes (impact>34); goals then breathe through 0.85s of 0.32x slow-mo (sim dt only —
+  audio keeps rolling). Speed widens the lens: FOV 80 -> ~89 flat-out (RL-style kick). Supersonic
+  wind-rush audio layer (bandpass noise on the engine bus) + screen-space speed streaks (canvas-
+  generated radial lines, opacity ramps 42->66 speed) + an always-on soft vignette.
+- MENU: the lobby is now a live cinematic — slow drone-orbit of the actual arena (weather, crowd,
+  ducks all runnin') behind a glass UI. Clicking an arena swaps the whole backdrop LIVE. Gold-shine
+  animated title, glassy blurred cards/buttons with hover lift, pulsing GIT 'ER DONE.
+- AUDIO: front-porch banjo loop noodles in the lobby (4 licks, starts on first click — autoplay
+  rules), and each venue has an ambience bed: cold wind swells on the pond, cricket fields in the
+  bog + marsh (pure WebAudio, no new assets).
+- RENDER: pixelRatio cap 1.5 -> 2 (retina-sharp), shadow maps 1024 -> 2048. Measured 7.8ms/frame
+  (~128fps implied) — 60fps target keeps 2x headroom.
 [2026-07-18 iter 26 — full per-venue theming: no more hay bales or half-barns outdoors, per user request]
 - The bale boards, crowd perches, and barn-door goal facades were shared across venues — the marsh
   had hay bales on the sides and floating half-barn ends. Now each is a themed, toggleable set at
@@ -273,36 +287,45 @@ STILL TO DO (ideas for future iterations):
   /* ---------- LOBBY ---------- */
   #lobby {
     position:absolute; inset:0; z-index:20; overflow-y:auto;
-    background: radial-gradient(ellipse at 50% 30%, #3a2a12 0%, #1a1208 70%);
+    background: linear-gradient(180deg, rgba(14,9,4,0.88) 0%, rgba(14,9,4,0.52) 26%, rgba(14,9,4,0.52) 72%, rgba(14,9,4,0.9) 100%);
     color:#f2e2c4; padding:24px 16px 60px;
   }
   .lobby-inner { max-width:900px; margin:0 auto; text-align:center; }
   h1.title {
-    font-size:min(8vw,54px); letter-spacing:2px; color:#ffb347; margin-bottom:2px;
-    text-shadow: 3px 3px 0 #6b2b0e, 6px 6px 0 rgba(0,0,0,.6); transform:rotate(-2deg);
+    font-size:min(8vw,54px); letter-spacing:2px; margin-bottom:2px; transform:rotate(-2deg);
+    background:linear-gradient(100deg, #ffb347 32%, #fff3c9 50%, #ffb347 64%);
+    background-size:230% 100%; -webkit-background-clip:text; background-clip:text;
+    -webkit-text-fill-color:transparent; color:transparent;
+    filter: drop-shadow(3px 3px 0 #6b2b0e) drop-shadow(0 7px 12px rgba(0,0,0,.75));
+    animation: titleShine 6s ease-in-out infinite;
   }
-  .subtitle { color:#c9a15f; font-size:15px; margin-bottom:4px; font-style:italic; }
-  .rating { display:inline-block; background:#b3122e; color:#fff; font-weight:bold; padding:3px 10px; border-radius:4px; font-size:12px; margin-bottom:18px; letter-spacing:1px; }
-  .section { margin:18px 0 8px; font-size:14px; text-transform:uppercase; letter-spacing:3px; color:#ffb347; }
+  @keyframes titleShine { 0%,58% { background-position: 120% 0; } 88%,100% { background-position: -60% 0; } }
+  .subtitle { color:#e6c88f; font-size:15px; margin-bottom:4px; font-style:italic; text-shadow:0 2px 6px rgba(0,0,0,.8); }
+  .rating { display:inline-block; background:#b3122e; color:#fff; font-weight:bold; padding:3px 10px; border-radius:4px; font-size:12px; margin-bottom:18px; letter-spacing:1px; box-shadow:0 3px 10px rgba(0,0,0,.5); }
+  .section { margin:18px 0 8px; font-size:14px; text-transform:uppercase; letter-spacing:3px; color:#ffb347; text-shadow:0 2px 6px rgba(0,0,0,.9); }
   input#player-name {
-    background:#2a1d0d; border:2px solid #8a5a24; color:#ffe9c9; font-size:20px; padding:10px 16px;
+    background:rgba(32,21,9,0.82); border:2px solid #8a5a24; color:#ffe9c9; font-size:20px; padding:10px 16px;
     border-radius:8px; text-align:center; width:280px; outline:none; font-family:inherit;
+    backdrop-filter:blur(5px); -webkit-backdrop-filter:blur(5px);
   }
   .btn-row { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; }
   .pick-btn {
-    background:#2a1d0d; border:2px solid #8a5a24; color:#f2e2c4; padding:12px 22px; border-radius:10px;
-    font-size:16px; cursor:pointer; font-family:inherit; transition:all .12s;
+    background:rgba(32,21,9,0.78); border:2px solid #8a5a24; color:#f2e2c4; padding:12px 22px; border-radius:10px;
+    font-size:16px; cursor:pointer; font-family:inherit; transition:transform .15s, border-color .15s, box-shadow .2s, background .2s;
+    backdrop-filter:blur(5px); -webkit-backdrop-filter:blur(5px);
   }
-  .pick-btn:hover { transform:translateY(-2px); border-color:#ffb347; }
+  .pick-btn:hover { transform:translateY(-2px) scale(1.03); border-color:#ffb347; box-shadow:0 6px 16px rgba(0,0,0,.45); }
   .pick-btn.sel-blue { background:#123a63; border-color:#4fa3ff; box-shadow:0 0 14px #2277dd88; }
   .pick-btn.sel-red  { background:#5e1410; border-color:#ff6a4f; box-shadow:0 0 14px #dd442288; }
   .pick-btn.sel      { background:#4a3413; border-color:#ffb347; box-shadow:0 0 14px #ffb34766; }
   .vehicles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; max-width:860px; margin:0 auto; }
   .vcard {
-    background:#241809; border:2px solid #6b4a1e; border-radius:12px; padding:10px 8px; cursor:pointer; transition:all .12s; text-align:left;
+    background:rgba(30,19,7,0.82); border:2px solid #6b4a1e; border-radius:12px; padding:10px 8px; cursor:pointer; text-align:left;
+    transition:transform .15s, border-color .15s, box-shadow .2s, background .2s;
+    backdrop-filter:blur(5px); -webkit-backdrop-filter:blur(5px);
   }
-  .vcard:hover { transform:translateY(-3px); border-color:#ffb347; }
-  .vcard.sel { border-color:#ffb347; background:#3a2810; box-shadow:0 0 16px #ffb34755; }
+  .vcard:hover { transform:translateY(-3px) scale(1.02); border-color:#ffb347; box-shadow:0 8px 18px rgba(0,0,0,.5); }
+  .vcard.sel { border-color:#ffb347; background:rgba(58,40,16,0.9); box-shadow:0 0 16px #ffb34755; }
   .vname { font-weight:bold; color:#ffd98a; font-size:15px; }
   .vflavor { font-size:11px; color:#bd9c6b; font-style:italic; margin:4px 0 8px; min-height:40px; }
   .stat { font-size:10px; color:#9c8358; text-transform:uppercase; letter-spacing:1px; }
@@ -312,9 +335,13 @@ STILL TO DO (ideas for future iterations):
     margin-top:26px; font-size:26px; padding:16px 54px; border-radius:14px; border:3px solid #ffb347;
     background:linear-gradient(180deg,#c96a1e,#8a3d0e); color:#fff; cursor:pointer; font-family:inherit; font-weight:bold;
     letter-spacing:2px; text-shadow:2px 2px 0 rgba(0,0,0,.5); box-shadow:0 6px 0 #4a2005, 0 10px 24px rgba(0,0,0,.6);
-    transition:all .1s;
+    transition:all .1s; animation: startPulse 2.4s ease-in-out infinite;
   }
-  #start-btn:hover { transform:translateY(2px); box-shadow:0 4px 0 #4a2005, 0 8px 18px rgba(0,0,0,.6); }
+  @keyframes startPulse {
+    0%,100% { box-shadow:0 6px 0 #4a2005, 0 10px 24px rgba(0,0,0,.6); }
+    50%     { box-shadow:0 6px 0 #4a2005, 0 10px 24px rgba(0,0,0,.6), 0 0 26px #ffb34766; }
+  }
+  #start-btn:hover { transform:translateY(2px); box-shadow:0 4px 0 #4a2005, 0 8px 18px rgba(0,0,0,.6), 0 0 30px #ffb34788; }
   .warn { color:#8a6a3a; font-size:11px; margin-top:16px; }
 
   /* ---------- HUD ---------- */
@@ -363,6 +390,12 @@ STILL TO DO (ideas for future iterations):
   .ov-btn { pointer-events:auto; font-size:20px; padding:12px 34px; margin:6px; border-radius:10px; border:2px solid #ffb347; background:#3a2810; color:#ffd98a; cursor:pointer; font-family:inherit; }
   .ov-btn:hover { background:#5a3d18; }
   .gp-focus { outline:3px solid #ffe9a0 !important; outline-offset:2px; box-shadow:0 0 18px #ffe9a088 !important; }
+  /* cinematic overlays: always-on soft vignette + speed streaks that fade in flat-out */
+  #fx-vignette { position:fixed; inset:0; pointer-events:none; z-index:5;
+    background:radial-gradient(ellipse at center, transparent 58%, rgba(10,5,2,0.38) 100%); }
+  #fx-speed { position:fixed; inset:0; pointer-events:none; z-index:5; opacity:0;
+    background-size:cover; background-position:center; }
+  #fx-flash { position:fixed; inset:0; pointer-events:none; z-index:6; opacity:0; transition:opacity .55s ease-out; }
 </style>
 </head>
 <body>
@@ -415,6 +448,10 @@ STILL TO DO (ideas for future iterations):
     <div class="warn">⌨️ W/S drive · A/D steer · SPACE jump (twice = flip) · SHIFT boost · C ball-cam · ESC pause · M mute · V announcer<br>🎮 PS5 controller: R2 gas · L2 reverse · stick steer · ✕ jump · ◯/R1 boost · △ ball-cam · OPTIONS start/pause<br>🎮 This whole menu works with the controller too: D-pad or stick to move, ✕ to pick, OPTIONS to start. Keyboard: arrows/WASD + ENTER.<br>(Pair the controller and press any button so the browser detects it.) Solo demo — yer teammates &amp; rivals are bots. Watch yer ass: supersonic hits DEMOLISH folks now.<br><br><small style="opacity:.75">CREDITS — Cow &amp; farmer models: <b>Quaternius</b> (CC0). Announcer voice: <b>Kenney</b> Voiceover Pack (CC0), kenney.nl. Sounds via Wikimedia Commons: goal shout by <b>Frogfriend99</b> (CC BY-SA 3.0), vuvuzela by <b>DisillusionedBitterAndKnackered</b> (CC BY-SA 3.0), referee whistle by <b>SpliceSound</b> (CC0), moo by <b>MichaeltheFox8621</b> (CC BY-SA 4.0), crowd by <b>WebbFilmsUK</b> (CC BY 4.0), sad trombone by <b>Sad Tromboner</b> (CC BY 4.0), train horn by <b>WeenyBeany</b> (CC BY 4.0). 3D engine: three.js (MIT).</small></div>
   </div>
 </div>
+
+<div id="fx-vignette"></div>
+<div id="fx-speed"></div>
+<div id="fx-flash"></div>
 
 <!-- ==================== HUD ==================== -->
 <div id="hud">
@@ -4747,7 +4784,8 @@ let SURF = ARENAS_DEF[0].surf;
   const atip = document.getElementById('arena-tip');
   document.querySelectorAll('#arena-row .pick-btn').forEach(b=>{
     b.onclick = ()=>{ document.querySelectorAll('#arena-row .pick-btn').forEach(x=>x.classList.remove('sel')); b.classList.add('sel');
-      lobby.arena=+b.dataset.arena; atip.textContent = ARENAS_DEF[lobby.arena].tip; };
+      lobby.arena=+b.dataset.arena; atip.textContent = ARENAS_DEF[lobby.arena].tip;
+      applyArena(lobby.arena); };   // the menu backdrop IS the arena — swap it live as ya browse
   });
   atip.textContent = ARENAS_DEF[0].tip;
 })();
@@ -4891,7 +4929,15 @@ function startEngine(){
   const g = ac.createGain(); g.gain.value=0;
   o.connect(f); o2.connect(f); f.connect(g); g.connect(masterGain);
   o.start(); o2.start();
-  engine = { o, o2, f, g };
+  // wind rush layer — looping noise through a bandpass, silent until yer really movin'
+  const wlen = ac.sampleRate * 2, wbuf = ac.createBuffer(1, wlen, ac.sampleRate), wd = wbuf.getChannelData(0);
+  for(let i=0;i<wlen;i++) wd[i] = Math.random()*2-1;
+  const wsrc = ac.createBufferSource(); wsrc.buffer = wbuf; wsrc.loop = true;
+  const wf = ac.createBiquadFilter(); wf.type='bandpass'; wf.frequency.value=900; wf.Q.value=0.6;
+  const wg = ac.createGain(); wg.gain.value = 0;
+  wsrc.connect(wf); wf.connect(wg); wg.connect(masterGain);
+  wsrc.start();
+  engine = { o, o2, f, g, wf, wg };
 }
 function updateEngine(speed, boosting){
   if(!engine || !AC) return;
@@ -4901,6 +4947,65 @@ function updateEngine(speed, boosting){
   engine.f.frequency.setTargetAtTime(220 + speed*7, AC.currentTime, 0.08);
   const active = (game.state==='play'||game.state==='countdown') && !game.paused;
   engine.g.gain.setTargetAtTime(active ? 0.035 + Math.min(0.03, speed*0.0006) : 0, AC.currentTime, 0.1);
+  // wind builds past cruising speed, howls at supersonic
+  const wind = active ? Math.min(1, Math.max(0, (speed - 36) / 26)) : 0;
+  engine.wg.gain.setTargetAtTime(wind*wind*0.14, AC.currentTime, 0.12);
+  engine.wf.frequency.setTargetAtTime(700 + wind*900, AC.currentTime, 0.15);
+}
+
+// ---- front-porch banjo: a lazy loop that noodles while yer in the lobby ----
+// (starts on the first click — browsers won't let audio play before a gesture)
+let menuMusicOn = false;
+const PORCH_LICKS = [
+  [[196,0],[247,.3],[294,.6],[392,.9],[494,1.2],[392,1.5],[294,1.8],[247,2.1]],
+  [[196,0],[294,.3],[392,.6],[494,.9],[587,1.2],[494,1.5],[392,1.8],[294,2.1]],
+  [[330,0],[392,.3],[440,.6],[494,.9],[440,1.2],[392,1.5],[330,1.8],[294,2.1]],
+  [[196,0],[392,.45],[494,.6],[392,.9],[587,1.35],[494,1.5],[392,1.8],[196,2.1]],
+];
+function menuMusicTick(){
+  if(game.state!=='lobby' || !AC || muted){ menuMusicOn = false; return; }
+  const lick = PORCH_LICKS[Math.floor(Math.random()*PORCH_LICKS.length)];
+  for(const nt of lick) pluck(nt[0], nt[1], 0.055);
+  setTimeout(menuMusicTick, 2400);
+}
+function tryMenuMusic(){
+  if(menuMusicOn || game.state!=='lobby') return;
+  if(!audio()) return;
+  menuMusicOn = true; menuMusicTick();
+}
+if(typeof document.addEventListener === 'function') document.addEventListener('pointerdown', tryMenuMusic);
+
+// ---- arena ambience beds: what the venue sounds like between the action ----
+let amb = { kind:'none', nodes:[] };
+function setAmbience(kind){
+  if(amb.kind === kind && (amb.nodes.length || kind==='none')) return;
+  for(const n of amb.nodes){ try{ if(n.stop) n.stop(); n.disconnect(); }catch(e){} }
+  amb = { kind, nodes:[] };
+  const ac = AC; if(!ac || kind==='none') return;
+  if(kind==='wind'){                                  // frozen pond: cold wind swellin' and dyin'
+    const len=ac.sampleRate*2, buf=ac.createBuffer(1,len,ac.sampleRate), d=buf.getChannelData(0);
+    for(let i=0;i<len;i++) d[i]=Math.random()*2-1;
+    const src=ac.createBufferSource(); src.buffer=buf; src.loop=true;
+    const f=ac.createBiquadFilter(); f.type='lowpass'; f.frequency.value=340;
+    const g=ac.createGain(); g.gain.value=0.026;
+    const lfo=ac.createOscillator(); lfo.frequency.value=0.13;
+    const lg=ac.createGain(); lg.gain.value=0.011;
+    lfo.connect(lg); lg.connect(g.gain);
+    src.connect(f); f.connect(g); g.connect(masterGain);
+    src.start(); lfo.start();
+    amb.nodes=[src,lfo,lg,f,g];
+  } else if(kind==='crickets'){                       // bog + marsh: a field of crickets trillin'
+    [3900, 4380].forEach((fr,i)=>{
+      const o=ac.createOscillator(); o.type='square'; o.frequency.value=fr;
+      const g=ac.createGain(); g.gain.value=0.0042;
+      const lfo=ac.createOscillator(); lfo.type='square'; lfo.frequency.value=10.5+i*4.3;
+      const lg=ac.createGain(); lg.gain.value=0.0042;
+      lfo.connect(lg); lg.connect(g.gain);
+      o.connect(g); g.connect(masterGain);
+      o.start(); lfo.start();
+      amb.nodes.push(o,lfo,lg,g);
+    });
+  }
 }
 
 // --- announcer ---
@@ -4916,7 +5021,7 @@ function setMuted(m){
 // ---------------- THREE SETUP ----------------
 const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
 renderer.setSize(innerWidth, innerHeight);
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.domElement.id = 'game-canvas';
@@ -4950,7 +5055,7 @@ scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffb070, 1.15);
 sun.position.set(60, 100, 40);
 sun.castShadow = true;
-sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.left = -120; sun.shadow.camera.right = 120;
 sun.shadow.camera.top = 120; sun.shadow.camera.bottom = -120;
 sun.shadow.camera.far = 300;
@@ -5544,10 +5649,10 @@ function updateDucks(dt){
 
 // venue looks: fog + light tint + floor surface + weather + which scenery/boards/goal dressing stands
 const ARENA_LOOKS = [
-  { fog:0x46283c, near:200, far:460, sky:0xbb7a99, ground:0x2a1d0d, sunC:0xffb070, sunI:1.15, map:()=>fieldTex, weather:'off',       shell:true,  bog:false, marsh:false, boards:'barn',  outer:0x4a3a20 },
-  { fog:0x2c3c50, near:170, far:430, sky:0x9fc4e8, ground:0x24303c, sunC:0xcfe4ff, sunI:1.0,  map:()=>iceTex,   weather:'snow',      shell:true,  bog:false, marsh:false, boards:'barn',  outer:0x4a4438 },
-  { fog:0x25301e, near:150, far:430, sky:0x7a9a6a, ground:0x1a1608, sunC:0xd8e89a, sunI:0.85, map:()=>bogTex,   weather:'fireflies', shell:false, bog:true,  marsh:false, boards:'bog',   outer:0x2c2c1a },
-  { fog:0x8a94a0, near:180, far:470, sky:0xc8d4e0, ground:0x3a4434, sunC:0xffd9a0, sunI:1.05, map:()=>marshTex, weather:'off',       shell:false, bog:false, marsh:true,  boards:'marsh', outer:0x3a5548 },
+  { fog:0x46283c, near:200, far:460, sky:0xbb7a99, ground:0x2a1d0d, sunC:0xffb070, sunI:1.15, map:()=>fieldTex, weather:'off',       shell:true,  bog:false, marsh:false, boards:'barn',  outer:0x4a3a20, amb:'none' },
+  { fog:0x2c3c50, near:170, far:430, sky:0x9fc4e8, ground:0x24303c, sunC:0xcfe4ff, sunI:1.0,  map:()=>iceTex,   weather:'snow',      shell:true,  bog:false, marsh:false, boards:'barn',  outer:0x4a4438, amb:'wind' },
+  { fog:0x25301e, near:150, far:430, sky:0x7a9a6a, ground:0x1a1608, sunC:0xd8e89a, sunI:0.85, map:()=>bogTex,   weather:'fireflies', shell:false, bog:true,  marsh:false, boards:'bog',   outer:0x2c2c1a, amb:'crickets' },
+  { fog:0x8a94a0, near:180, far:470, sky:0xc8d4e0, ground:0x3a4434, sunC:0xffd9a0, sunI:1.05, map:()=>marshTex, weather:'off',       shell:false, bog:false, marsh:true,  boards:'marsh', outer:0x3a5548, amb:'crickets' },
 ];
 function applyArena(i){
   const L = ARENA_LOOKS[i] || ARENA_LOOKS[0];
@@ -5569,6 +5674,7 @@ function applyArena(i){
   goalBogDecor.visible = L.boards==='bog';
   goalMarshDecor.visible = L.boards==='marsh';
   if(mud.material && mud.material.color && mud.material.color.setHex) mud.material.color.setHex(L.outer);
+  setAmbience(L.amb || 'none');
   setWeather(L.weather);
 }
 
@@ -6649,6 +6755,25 @@ const HUD = {
   ann: document.getElementById('announcer'), cd: document.getElementById('countdown'),
   chat: document.getElementById('chat'),
 };
+// pre-render the supersonic streak overlay once (radial motion lines, screen-space)
+const fxSpeedEl = document.getElementById('fx-speed');
+(function makeStreaks(){
+  try{
+    const c = document.createElement('canvas'); c.width=1024; c.height=576;
+    const g = c.getContext('2d'); const cx=512, cy=288;
+    for(let i=0;i<90;i++){
+      const a = Math.random()*Math.PI*2;
+      const r0 = 250+Math.random()*130, r1 = r0+60+Math.random()*170;
+      const x0=cx+Math.cos(a)*r0, y0=cy+Math.sin(a)*r0*0.62, x1=cx+Math.cos(a)*r1, y1=cy+Math.sin(a)*r1*0.62;
+      const grad = g.createLinearGradient(x0,y0,x1,y1);
+      grad.addColorStop(0,'rgba(255,255,255,0)'); grad.addColorStop(1,'rgba(255,246,220,0.85)');
+      g.strokeStyle=grad; g.lineWidth=1+Math.random()*2.2;
+      g.beginPath(); g.moveTo(x0,y0); g.lineTo(x1,y1); g.stroke();
+    }
+    fxSpeedEl.style.backgroundImage = 'url('+c.toDataURL()+')';
+  }catch(e){ /* headless: no real canvas — overlay just stays blank */ }
+})();
+
 let annTimer = null;
 function announce(text, dur=3.2, speak=true){
   HUD.ann.textContent = text; HUD.ann.style.opacity = 1;
@@ -7075,6 +7200,8 @@ function carBallCollide(c, dt){
     // car recoil
     c.vel.addScaledVector(n, -impact*0.25);
     if(impact>3){ ball.lastTouch = c; c.touches++; }
+    // a real wallop off the player's own bumper gets a frame of hitstop — sells the contact
+    if(c.isPlayer && impact > 34) hitstop = Math.max(hitstop, 0.045);
     // "WHAT A SAVE" — defender clears a ball that was headin' for his own net
     const ownGx = c.team===0 ? -ARENA.halfX : ARENA.halfX;
     const wasThreat = (ownGx<0 ? preVx < -14 : preVx > 14)
@@ -7106,6 +7233,7 @@ function demolish(victim, culprit){
   victim.dead = 3;
   victim.mesh.visible = false; victim.tag.visible = false;
   burst(new THREE.Vector3(victim.pos.x, victim.pos.y+2, victim.pos.z), 0xff5522, 45, 22);
+  hitstop = Math.max(hitstop, 0.08);          // let the wreck land
   // the driver gets blown clear and eats dirt (Death clip, once, then fade with the respawn)
   if(charModel){
     const corpse = buildCharacter({ shirt:pick(plaidCols), pants:0x35507a, skin:pick(skinTones), scale:DRV_S, clip:'Idle' });
@@ -7286,6 +7414,12 @@ function scoreGoal(team){
       Math.random()<0.5?0xfff2c0:fc, 0.6+Math.random()*0.5, 1.1, -14);
   }
   camShake = 1.2; crowdHype = 1;
+  hitstop = 0.06; goalSlowT = 0.85;
+  // team-colored screen flash, decaying through the slow-mo
+  const fl = document.getElementById('fx-flash');
+  fl.style.background = team===0 ? '#4fa3ff' : '#ff6a4f';
+  fl.style.transition = 'none'; fl.style.opacity = 0.42;
+  setTimeout(()=>{ fl.style.transition = 'opacity .55s ease-out'; fl.style.opacity = 0; }, 60);          // freeze the moment of impact, then let it breathe in slow-mo
   const gx = team===0 ? 1 : -1;              // shove the ball on into the barn so ya see it roll all the way in
   ball.vel.set(gx*42, 7, ball.vel.z*0.35);
   game.state='goal'; game.goalT = 3.2;
@@ -7444,6 +7578,13 @@ function updateCamera(dt){
   camLook.lerp(lookTarget, 1 - Math.exp(-lookRate * dt));
   const lk = camLook.clone(); lk.y += 1.2; // slight downward angle (~RL -3°)
   camera.lookAt(lk);
+  // speed widens the lens (RL-style FOV kick): 80° cruising, up to ~89° flat-out with boost
+  const pspd = Math.hypot(p.vel.x, p.vel.z);
+  const fovT = 80 + THREE.MathUtils.clamp((pspd - 38) / 28, 0, 1) * 9;
+  if(Math.abs(camera.fov - fovT) > 0.02){
+    camera.fov += (fovT - camera.fov) * Math.min(1, 6*dt);
+    camera.updateProjectionMatrix();
+  }
   updateXray(p.pos, dt);   // ghost out anything standing between the lens and yer vehicle
   if(camShake > 0){
     camera.position.x += (Math.random()-0.5)*camShake*2.2;
@@ -7460,10 +7601,16 @@ function fmtTime(t){
 }
 refreshNav(); // initial lobby focus
 
+// AAA feel: a frozen frame on big impacts, a beat of slow-mo when the ball goes in.
+// Both scale the sim dt only — real time (and the audio) keeps rolling.
+let hitstop = 0, goalSlowT = 0;
 function animate(){
   requestAnimationFrame(animate);
   ensureSize();
-  let dt = Math.min(clock.getDelta(), 0.033);
+  const rawDt = Math.min(clock.getDelta(), 0.033);
+  let dt = rawDt;
+  if(hitstop > 0){ hitstop -= rawDt; dt = 0.0001; }
+  else if(goalSlowT > 0){ goalSlowT -= rawDt; dt *= 0.32; }
 
   // gamepad — poll every frame, handle button edges
   const pad = pollPad();
@@ -7486,7 +7633,15 @@ function animate(){
     }
   }
 
-  if(game.state==='lobby'){ renderer.render(scene,camera); return; }
+  if(game.state!=='play') fxSpeedEl.style.opacity = 0;   // streaks are a full-speed-only thing
+  if(game.state==='lobby'){
+    // cinematic menu: slow drone-orbit of the live arena while ya pick — weather, crowd n' all
+    const mt = performance.now()/1000;
+    camera.position.set(Math.sin(mt*0.07)*92, 23 + Math.sin(mt*0.045)*5, Math.cos(mt*0.07)*92);
+    camera.lookAt(0, 5, 0);
+    updateDust(dt); updateWeather(dt); updateDucks(dt); updateCrowd(dt);
+    renderer.render(scene,camera); return;
+  }
   if(game.paused){ renderer.render(scene,camera); return; }
 
   // pads respawn
@@ -7578,6 +7733,9 @@ function animate(){
     const mph = Math.round(pSpeed * 2.1);
     HUD.speedo.textContent = mph + ' mph' + (pSpeed>SUPERSONIC ? '  🔥 SUPERSONIC' : '');
     updateEngine(pSpeed, pin.boost);
+    // speed streaks bloom in as ya close on supersonic
+    const sfx = THREE.MathUtils.clamp((pSpeed - 42) / 24, 0, 1);
+    fxSpeedEl.style.opacity = (sfx*sfx*0.34).toFixed(3);
   }
 
   updateParticles(dt);
