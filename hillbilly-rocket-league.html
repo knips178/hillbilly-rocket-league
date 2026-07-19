@@ -1,6 +1,16 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-18 iter 28 — AAA pass 2: kickoff cinematic, HUD glass, pickup pops; ACES tried + reverted]
+- Kickoff cinematic: every kickoff parks the camera high over midfield and GLIDES it down behind
+  yer car across the countdown (slower camera rates during 'countdown' only — gameplay stiffness
+  untouched). Countdown numbers pop in with a springy scale animation + glow.
+- Boost pads burst a ring of amber sparks on pickup (14 for big pads, 7 small).
+- HUD glass pass: clock/speedo/chat get blur + borders; chat lines slide in animated.
+- TRIED AND REVERTED: sRGB output + ACES filmic tone mapping. Verified against all four venues —
+  it relights every hand-tuned Lambert color and washed the APPROVED Frozen Pond to pink pastel.
+  A real migration needs every dynamic material path (vehicles, particle setHex pools) linearized.
+  Do NOT re-attempt casually; the note lives at the renderer setup.
 [2026-07-18 iter 27 — AAA pass: game feel, cinematic menu, audio beds, sharper render]
 - GAME FEEL: hitstop freeze-frames on demolitions (0.08s), goals (0.06s), and the player's own
   big ball strikes (impact>34); goals then breathe through 0.85s of 0.32x slow-mo (sim dt only —
@@ -354,7 +364,8 @@ STILL TO DO (ideas for future iterations):
   .score-team { padding:8px 22px; font-size:30px; color:#fff; min-width:90px; text-align:center; }
   .score-blue { background:linear-gradient(180deg,#2b6fb8,#123a63); border-radius:10px 0 0 10px; }
   .score-red  { background:linear-gradient(180deg,#b8422b,#5e1410); border-radius:0 10px 10px 0; }
-  #clock { background:#151008; color:#ffd98a; padding:8px 18px; font-size:26px; display:flex; align-items:center; }
+  #clock { background:rgba(21,16,8,0.86); color:#ffd98a; padding:8px 18px; font-size:26px; display:flex; align-items:center;
+    backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); }
   .tname { font-size:10px; letter-spacing:1px; opacity:.85; display:block; text-transform:uppercase; }
   #boost-wrap { position:absolute; right:28px; bottom:26px; text-align:center; }
   #boost-ring {
@@ -365,7 +376,8 @@ STILL TO DO (ideas for future iterations):
   }
   #boost-ring > div { width:82px; height:82px; border-radius:50%; background:#151008cc; color:#ffd98a; font-size:26px; font-weight:bold; display:flex; align-items:center; justify-content:center; flex-direction:column; }
   #boost-ring small { font-size:9px; letter-spacing:2px; color:#9c8358; }
-  #speedo { position:absolute; left:28px; bottom:26px; color:#f2e2c4; font-size:14px; background:#151008aa; padding:8px 14px; border-radius:8px; }
+  #speedo { position:absolute; left:28px; bottom:26px; color:#f2e2c4; font-size:14px; background:rgba(21,16,8,0.68); padding:8px 14px; border-radius:8px;
+    backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); border:1px solid rgba(255,179,71,0.25); }
   #announcer {
     position:absolute; top:22%; left:50%; transform:translateX(-50%); width:90%; text-align:center;
     font-size:min(6vw,44px); font-weight:bold; color:#ffb347; text-shadow:3px 3px 0 #000, 0 0 30px #ff6a00aa;
@@ -373,10 +385,14 @@ STILL TO DO (ideas for future iterations):
   }
   #countdown {
     position:absolute; top:38%; left:50%; transform:translate(-50%,-50%);
-    font-size:120px; font-weight:bold; color:#fff; text-shadow:4px 4px 0 #000; opacity:0;
+    font-size:120px; font-weight:bold; color:#fff; text-shadow:4px 4px 0 #000, 0 0 40px #ffb34788; opacity:0;
   }
+  #countdown.pop { animation:cdPop .5s cubic-bezier(.2,1.6,.4,1); }
+  @keyframes cdPop { from { transform:translate(-50%,-50%) scale(2.1); opacity:.2; } to { transform:translate(-50%,-50%) scale(1); opacity:1; } }
   #chat { position:absolute; left:20px; bottom:110px; width:340px; font-size:13px; color:#e8d5b0; }
-  .chat-line { background:#15100899; padding:4px 10px; border-radius:6px; margin-top:4px; text-shadow:1px 1px 0 #000; }
+  .chat-line { background:rgba(21,16,8,0.62); padding:4px 10px; border-radius:6px; margin-top:4px; text-shadow:1px 1px 0 #000;
+    backdrop-filter:blur(5px); -webkit-backdrop-filter:blur(5px); animation:chatIn .25s ease-out; }
+  @keyframes chatIn { from { transform:translateX(-14px); opacity:0; } to { transform:none; opacity:1; } }
   .chat-line b.blue { color:#6fb3ff; } .chat-line b.red { color:#ff8a6f; }
   #controls-hint { position:absolute; right:24px; top:70px; font-size:11px; color:#cbb086; background:#15100899; padding:8px 12px; border-radius:8px; text-align:right; line-height:1.7; }
 
@@ -5022,6 +5038,9 @@ function setMuted(m){
 const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+// NOTE (iter 28): tried the filmic pipeline here (sRGB out + ACES). Verified against all venues
+// and REVERTED — it relights every hand-tuned material and washed out the approved Frozen Pond.
+// A proper colorspace migration would need every dynamic material path linearized; not worth it.
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.domElement.id = 'game-canvas';
@@ -7057,6 +7076,11 @@ function updateCar(c, dt, input){
       if(p.big){ c.boost = 100; p.timer = 10; }
       else { c.boost = Math.min(100, c.boost+12); p.timer = 4; }
       p.mesh.visible = false;
+      // pickup pop: a ring of amber sparks jumps off the pad
+      const nSp = p.big ? 14 : 7;
+      for(let k=0;k<nSp;k++){ const a=(k/nSp)*Math.PI*2;
+        spawnGlow(p.x+Math.cos(a)*p.r*0.6, 0.6, p.z+Math.sin(a)*p.r*0.6,
+          Math.cos(a)*7, 9+Math.random()*5, Math.sin(a)*7, p.big?0xffd23e:0xffb347, 0.4, p.big?1.4:0.9, -4); }
       if(c.isPlayer) beep(600,0.09,'triangle',0.08,200);
     }
   }
@@ -7383,6 +7407,13 @@ function resetKickoff(){
     }
   });
   game.state='countdown'; game.countdownT = 3.4;
+  // kickoff cinematic: park the camera high and wide over midfield — the normal camera lerp
+  // swoops it down behind yer car through the countdown (free drama, three lines)
+  if(game.player){
+    const side = game.player.team===0 ? -1 : 1;
+    camPos.set(side*30, 26, game.player.pos.z*0.4 + (game.player.pos.z>=0?34:-34));
+    camLook.set(0, 2, 0);
+  }
 }
 
 function scoreGoal(team){
@@ -7569,8 +7600,10 @@ function updateCamera(dt){
   // so the camera quits easing and hustles instead of crawling over ~0.4s.
   // (1 - b^dt === 1 - e^(-r*dt) with r = -ln(b); the open-field rates below match the old feel.)
   const urgency = inGoal ? 1 : Math.min(1, (lost / CAM_DIST) * 2.0);
-  const posRate  =  7.6 + (22.0 -  7.6) * urgency;   // 95% settle: 0.39s open -> 0.14s cornered
-  const lookRate = 12.2 + (30.0 - 12.2) * urgency;   // 0.25s -> 0.10s
+  let posRate  =  7.6 + (22.0 -  7.6) * urgency;   // 95% settle: 0.39s open -> 0.14s cornered
+  let lookRate = 12.2 + (30.0 - 12.2) * urgency;   // 0.25s -> 0.10s
+  // kickoff cinematic: glide down from the wide shot instead of snapping (countdown only)
+  if(game.state==='countdown'){ posRate = 2.1; lookRate = 3.2; }
   // position stiffness (~RL 0.45 in the open)
   camPos.lerp(want, 1 - Math.exp(-posRate * dt));
   camera.position.copy(camPos);
@@ -7655,10 +7688,12 @@ function animate(){
     const n = Math.ceil(game.countdownT);
     if(game.countdownT>0.4){
       if(HUD.cd.textContent !== String(n)){ HUD.cd.textContent = n; pluck(N.G3, 0, 0.2);
+        HUD.cd.classList.remove('pop'); void HUD.cd.offsetWidth; HUD.cd.classList.add('pop');
         playVox(n===3 ? 'three' : n===2 ? 'two' : n===1 ? 'one' : null); }   // real voice counts it down
       HUD.cd.style.opacity = 1;
     } else if(game.countdownT>0){
-      if(HUD.cd.textContent!=='GIT!'){ HUD.cd.textContent='GIT!'; banjoKickoff();
+      if(HUD.cd.textContent!=='GIT!'){ HUD.cd.textContent='GIT!';
+        HUD.cd.classList.remove('pop'); void HUD.cd.offsetWidth; HUD.cd.classList.add('pop'); banjoKickoff();
         playSample('sfx:whistle', 0.85); playVox('go'); }   // ref whistle kicks it off, soccer-style
     } else {
       HUD.cd.style.opacity = 0; HUD.cd.textContent='';
