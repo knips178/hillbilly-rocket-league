@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-19 iter 35 — riders sized right: drivers/cow-riders match the crowd, per user report]
+- The folks driving looked shrunk: tractor drivers rode at scale 1.3 and cow riders at 1.15 while
+  the standing crowd is 1.75, so a driver measured 2.41u tall vs a spectator's 3.25u — a 74%-size
+  person on the rig. Now DRV_S and CRID_S are both 1.75 (same-sized folks everywhere); seat/saddle
+  fit re-dialed in-browser (DRV_Y 1.95->1.55, CRID_Y 2.45->2.35). Demolition-corpse farmer reads
+  DRV_S so it matches automatically. Verified: driver box height 3.25 == crowd 3.25 on fresh spawn.
 [2026-07-19 iter 34 — touch controls: playable on iPhone/iPad]
 - Virtual stick (left thumb: up=gas, down=reverse, sideways=steer) + JUMP / BOOST(hold) / CAM /
   pause buttons (right thumb). Pointer-events based, merges into player input exactly like the
@@ -6699,8 +6705,10 @@ function makeDriver(){
   return buildCharacter({ sit:true, reach:true, shirt:pick(plaidCols), pants:(Math.random()<0.5?0x35507a:0x3a3f2a),
                           skin:pick(skinTones), scale:DRV_S, clip:'Idle' });
 }
-const DRV_S = 1.3, DRV_Y = 1.95, DRV_Z = -1.05;        // tractor seat fit (dialed in-browser)
-const CRID_S = 1.15, CRID_Y = 2.45, CRID_Z = -0.15;    // cow saddle fit (dialed in-browser)
+// riders/drivers are the SAME-sized folks as the standing crowd (all 1.75) — before iter 35 the
+// drivers (1.3) and cow riders (1.15) rode shrunk down next to their rigs and the spectators.
+const DRV_S = 1.75, DRV_Y = 1.55, DRV_Z = -1.05;       // tractor seat fit (dialed in-browser)
+const CRID_S = 1.75, CRID_Y = 2.35, CRID_Z = -0.15;    // cow saddle fit (dialed in-browser)
 const CROWD_S = 1.75, CROWD_Y = 3.55;                  // standing on their bale
 // The stadium spawns before the async GLB parses land, so each loader callback calls this to
 // swap box stand-ins for the real animated models in place. Idempotent; upgrades whatever's loaded.
