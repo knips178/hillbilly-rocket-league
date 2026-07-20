@@ -1,6 +1,14 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-19 iter 34 — touch controls: playable on iPhone/iPad]
+- Virtual stick (left thumb: up=gas, down=reverse, sideways=steer) + JUMP / BOOST(hold) / CAM /
+  pause buttons (right thumb). Pointer-events based, merges into player input exactly like the
+  gamepad. UI only appears on touch-capable devices (body.touch); handlers are wired
+  unconditionally so hybrids work. Verified with synthetic pointer events: stick drag steers and
+  drives, jump fires, release zeroes clean.
+- Touch layout pass: keyboard/controller help hidden, boost gauge scaled + tucked top-right,
+  chat lifted clear of the stick, speedo centered bottom — nothing under yer thumbs.
 [2026-07-19 iter 33 — review pass: bots actually hit the ball now]
 - REVIEW FIND (measured): bots-only play was near-dead — 1 ball touch/min in the barn, ball moving
   just 11% of the time. Cause: attackers steered at an aim point 6u behind the ball and the
@@ -395,6 +403,34 @@ STILL TO DO (ideas for future iterations):
 
   /* ---------- HUD ---------- */
   #hud { position:absolute; inset:0; z-index:10; pointer-events:none; display:none; }
+  /* ---------- touch controls (shown only on touch devices, inside the HUD) ---------- */
+  #touch-ui { display:none; }
+  body.touch #touch-ui { display:block; }
+  #tstick {
+    position:absolute; left:4vw; bottom:14vh; width:34vmin; height:34vmin; max-width:190px; max-height:190px;
+    border-radius:50%; border:2px solid rgba(255,179,71,.4); background:rgba(21,14,6,.30);
+    pointer-events:auto; touch-action:none;
+  }
+  #tstick-nub {
+    position:absolute; left:50%; top:50%; width:38%; height:38%; transform:translate(-50%,-50%);
+    border-radius:50%; background:rgba(255,179,71,.45); border:2px solid rgba(255,220,150,.6);
+  }
+  .tbtn {
+    position:absolute; border-radius:50%; pointer-events:auto; touch-action:none;
+    background:rgba(21,14,6,.42); border:2px solid rgba(255,179,71,.5); color:#ffd98a;
+    font-family:inherit; font-weight:bold; display:flex; align-items:center; justify-content:center;
+    -webkit-user-select:none; user-select:none;
+  }
+  .tbtn:active { background:rgba(255,179,71,.35); }
+  #tb-jump  { right:5vw;  bottom:12vh; width:20vmin; height:20vmin; max-width:110px; max-height:110px; font-size:min(4.5vmin,24px); }
+  #tb-boost { right:20vw; bottom:22vh; width:16vmin; height:16vmin; max-width:90px; max-height:90px; font-size:min(3.6vmin,19px); }
+  #tb-cam   { right:6vw;  bottom:34vh; width:11vmin; height:11vmin; max-width:64px; max-height:64px; font-size:min(3vmin,15px); }
+  #tb-pause { right:3vw;  top:3vh;     width:10vmin; height:10vmin; max-width:56px; max-height:56px; font-size:min(3vmin,16px); }
+  /* touch devices: hide the keyboard help, un-collide HUD widgets from thumbs */
+  body.touch #controls-hint { display:none; }
+  body.touch #boost-wrap { right:4vw; bottom:auto; top:14vh; transform:scale(0.72); transform-origin:top right; }
+  body.touch #chat { bottom:46vh; width:56vw; font-size:11px; }
+  body.touch #speedo { left:50%; transform:translateX(-50%); bottom:2vh; }
   #scoreboard {
     position:absolute; top:12px; left:50%; transform:translateX(-50%);
     display:flex; align-items:stretch; gap:0; font-weight:bold;
@@ -524,6 +560,13 @@ STILL TO DO (ideas for future iterations):
 
 <!-- ==================== HUD ==================== -->
 <div id="hud">
+  <div id="touch-ui">
+    <div id="tstick"><div id="tstick-nub"></div></div>
+    <button class="tbtn" id="tb-jump">JUMP</button>
+    <button class="tbtn" id="tb-boost">BOOST</button>
+    <button class="tbtn" id="tb-cam">CAM</button>
+    <button class="tbtn" id="tb-pause">II</button>
+  </div>
   <div id="scoreboard">
     <div class="score-team score-blue"><span class="tname">Moonshiners</span><span id="score-blue">0</span></div>
     <div id="clock">5:00</div>
@@ -6981,6 +7024,58 @@ let ballCam = true;
 // ---------------- GAMEPAD (PS5 DualSense & any standard pad) ----------------
 // R2 gas · L2 reverse · Left stick steer (+flip direction) · ✕ jump/flip · ◯ or R1 boost · △ ball-cam · OPTIONS pause/start
 let padState = null, padButtonsPrev = [], padStickPrev = { x:0, y:0 };
+// ---------------- TOUCH CONTROLS (phones/tablets) ----------------
+// Left thumb: virtual stick (up=gas, down=reverse, sideways=steer). Right thumb: JUMP/BOOST/CAM.
+// State merges into player input exactly like the gamepad does; on non-touch devices the UI never shows.
+const TOUCH = { on:false, steer:0, throttle:0, boost:false, jumpEdge:false, camEdge:false, pauseEdge:false };
+(function initTouch(){
+  if(typeof document === 'undefined' || typeof document.body === 'undefined') return;
+  // visibility is gated on touch capability; the handlers are wired unconditionally so
+  // hybrid devices (and tests) work whenever the UI is shown
+  const touchy = (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0)
+    || (typeof window !== 'undefined' && 'ontouchstart' in window);
+  if(touchy){
+    TOUCH.on = true;
+    if(document.body.classList) document.body.classList.add('touch');
+  }
+  const stick = document.getElementById('tstick'), nub = document.getElementById('tstick-nub');
+  if(!stick || !stick.addEventListener) return;
+  let sid = null, sx = 0, sy = 0;
+  function setNub(dx, dy){ if(nub && nub.style) nub.style.transform = 'translate(calc(-50% + '+dx+'px), calc(-50% + '+dy+'px))'; }
+  stick.addEventListener('pointerdown', e => {
+    sid = e.pointerId; sx = e.clientX; sy = e.clientY;
+    try{ stick.setPointerCapture(sid); }catch(_){}
+    e.preventDefault();
+  });
+  stick.addEventListener('pointermove', e => {
+    if(e.pointerId !== sid) return;
+    const R = Math.max(40, stick.clientWidth * 0.5);
+    let dx = e.clientX - sx, dy = e.clientY - sy;
+    const len = Math.hypot(dx, dy);
+    if(len > R){ dx *= R/len; dy *= R/len; }
+    TOUCH.steer = -(dx / R);
+    TOUCH.throttle = -(dy / R);
+    setNub(dx, dy);
+    e.preventDefault();
+  });
+  const endStick = e => {
+    if(e.pointerId !== sid) return;
+    sid = null; TOUCH.steer = 0; TOUCH.throttle = 0; setNub(0, 0);
+  };
+  stick.addEventListener('pointerup', endStick);
+  stick.addEventListener('pointercancel', endStick);
+  function btn(id, down, up){
+    const b = document.getElementById(id);
+    if(!b || !b.addEventListener) return;
+    b.addEventListener('pointerdown', e => { down(); e.preventDefault(); });
+    if(up){ b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); }
+  }
+  btn('tb-jump',  () => { TOUCH.jumpEdge = true; });
+  btn('tb-boost', () => { TOUCH.boost = true; }, () => { TOUCH.boost = false; });
+  btn('tb-cam',   () => { TOUCH.camEdge = true; });
+  btn('tb-pause', () => { TOUCH.pauseEdge = true; });
+})();
+
 let gamepadBlocked = false;
 function activePad(){
   if(typeof navigator==='undefined' || !navigator.getGamepads) return null;
@@ -7786,6 +7881,12 @@ function animate(){
       if(pad.jumpEdge && game.player && !game.paused && (game.state==='play'||game.state==='countdown')) tryJump(game.player);
     }
   }
+  if(TOUCH.on){
+    if(TOUCH.pauseEdge && (game.state==='play'||game.state==='countdown')) togglePause();
+    if(TOUCH.camEdge) ballCam = !ballCam;
+    if(TOUCH.jumpEdge && game.player && !game.paused && (game.state==='play'||game.state==='countdown')) tryJump(game.player);
+    TOUCH.pauseEdge = TOUCH.camEdge = TOUCH.jumpEdge = false;
+  }
 
   if(game.state!=='play') fxSpeedEl.style.opacity = 0;   // streaks are a full-speed-only thing
   if(game.state==='lobby'){
@@ -7844,6 +7945,11 @@ function animate(){
         pin.throttle = THREE.MathUtils.clamp(pin.throttle + pad.throttle, -1, 1);
         pin.steer    = THREE.MathUtils.clamp(pin.steer + pad.steer, -1, 1);
         pin.boost    = pin.boost || pad.boost;
+      }
+      if(TOUCH.on){ // merge touch stick
+        pin.throttle = THREE.MathUtils.clamp(pin.throttle + TOUCH.throttle, -1, 1);
+        pin.steer    = THREE.MathUtils.clamp(pin.steer + TOUCH.steer, -1, 1);
+        pin.boost    = pin.boost || TOUCH.boost;
       }
     }
 

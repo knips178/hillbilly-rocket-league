@@ -56,3 +56,5 @@ MA-rated redneck-comedy Rocket League clone, solo vs bots. One self-contained Th
 - PS5, in-match (+ rumble): `R2` gas, `L2` reverse, stick steer, `✕` jump (twice = flip),
   `◯`/`R1` boost, `△` ball-cam, `OPTIONS` start/pause.
 - PS5, menus: D-pad/stick move focus, `✕` activate, `OPTIONS` start.
+- Touch (iter 34, phones/tablets): left-thumb virtual stick (up gas / down reverse / sideways steer),
+  right-thumb JUMP / BOOST (hold) / CAM buttons, pause top-right. Shows only on touch devices.
