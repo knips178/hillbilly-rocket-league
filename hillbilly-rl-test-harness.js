@@ -68,7 +68,7 @@ class Mesh extends Obj3D{ constructor(g,m){super(); this.geometry=g; this.materi
 class Cam extends Obj3D{ constructor(){super(); this.aspect=1; this.fov=80;} updateProjectionMatrix(){} }
 class Light extends Obj3D{ constructor(){super(); this.color={setHex(){}}; this.groundColor={setHex(){}}; this.intensity=1;
   this.shadow={mapSize:{set(){}},camera:{left:0,right:0,top:0,bottom:0,far:0}};} }
-class Mat { constructor(){ this.color={setHex(){}}; this.opacity=1; } }
+class Mat { constructor(){ this.color={setHex(){}}; this.opacity=1; this.userData={}; } dispose(){} }
 global.THREE = {
   WebGLRenderer: class { constructor(){ this.domElement=makeEl('canvas'); this.shadowMap={}; }
     setSize(){} setPixelRatio(){} render(){} },

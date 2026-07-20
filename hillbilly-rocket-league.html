@@ -1,6 +1,15 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-19 iter 32 — review pass: GPU resource leak fixed, dead code removed]
+- LEAK (review find, measured): every rematch leaked ~55 GPU textures + geometry buffers; ducks
+  leaked geometries every flight; corpses too. Root causes: (1) nothing disposed removed objects,
+  and (2) the big one — every SkeletonUtils clone (riders, corpses) carries its OWN Skeleton whose
+  bone-matrix texture nothing frees. disposeTree() now handles cars/tags/corpses/ducks: disposes
+  per-instance geometry (glTF-source geometries are flagged _shared at load — clones share them,
+  never dispose), non-shared materials, _ownTex canvas textures, and skinned-clone skeletons.
+  Measured: texture count now flat at ~349 across 6 rematches (was 346 -> 619).
+- Dead code out: paintTex() (unused since the iter-22 hull rewrite) and the say() TTS stub.
 [2026-07-19 iter 31 — review pass: themed-board x-ray fix, arena kickup colors, strike rumble]
 - REVIEW FIND: the themed boards (bog logs/stumps, marsh driftwood/docks) never registered as x-ray
   occluders — only hay bales self-register — so in bog/marsh corners they blocked yer car without
@@ -5061,7 +5070,7 @@ function setAmbience(kind){
 // --- announcer ---
 // The county-fair guy is now pre-rendered speech (see playVO). The old browser speechSynthesis
 // voice sounded like a robot — and is blocked in some embeds anyway — so it's retired.
-function say(){ /* no-op: replaced by pre-rendered VO clips */ }
+// say() removed iter 32 — it had no callers left
 function setMuted(m){
   muted = m;
   if(masterGain) masterGain.gain.value = muted ? 0 : 1;
@@ -5641,7 +5650,7 @@ function crack(){   // shotgun report: short hot noise burst
 }
 function updateDucks(dt){
   if(lobby.arena !== 3){
-    if(ducks.length){ for(const d of ducks) scene.remove(d.g); ducks.length = 0; }
+    if(ducks.length){ for(const d of ducks){ scene.remove(d.g); disposeTree(d.g); } ducks.length = 0; }
     return;
   }
   // spawn a flight now and again
@@ -5688,14 +5697,14 @@ function updateDucks(dt){
       if(d.g.position.y <= 0.6){                       // splashdown
         for(let k=0;k<10;k++) spawnPart(d.g.position.x, 0.5, d.g.position.z,
           (Math.random()-0.5)*7, 2+Math.random()*4, (Math.random()-0.5)*7, 0x9fc4b8, 0.4, 0.8);
-        scene.remove(d.g); ducks.splice(i,1); continue;
+        scene.remove(d.g); disposeTree(d.g); ducks.splice(i,1); continue;
       }
     } else {
       d.g.position.x += d.vx*dt;
       d.g.position.y += Math.sin(t*2+d.flap)*0.5*dt;
       const fl = Math.sin(t*11 + d.flap) * 0.85;       // wingbeat
       d.g.userData.wL.rotation.z = fl; d.g.userData.wR.rotation.z = -fl;
-      if(Math.abs(d.g.position.x) > ARENA.halfX+70){ scene.remove(d.g); ducks.splice(i,1); }
+      if(Math.abs(d.g.position.x) > ARENA.halfX+70){ scene.remove(d.g); disposeTree(d.g); ducks.splice(i,1); }
     }
   }
 }
@@ -6115,7 +6124,7 @@ function updateCrowd(dt){
     if(d.ttl < 0.8) d.grp.traverse(function(o){ if(o.isMesh){
       (Array.isArray(o.material)?o.material:[o.material]).forEach(function(m){ m.transparent = true; m.opacity = Math.max(0, d.ttl/0.8); });
     }});
-    if(d.ttl <= 0){ scene.remove(d.grp); deadFolks.splice(i,1); }
+    if(d.ttl <= 0){ scene.remove(d.grp); disposeTree(d.grp); deadFolks.splice(i,1); }
   }
 }
 
@@ -6265,23 +6274,7 @@ function shade(h, f){ const r=Math.min(255,(h>>16&255)*f)|0, gg=Math.min(255,(h>
 
 // clear-coated team paint: base color + sheen gradient + panel lines + rivets (cached per color)
 const paintCache = {};
-function paintTex(hex){
-  if(paintCache[hex]) return paintCache[hex];
-  const base = hex2css(hex);
-  const t = makeCanvasTex(256,256,(g,w,h)=>{
-    g.fillStyle=base; g.fillRect(0,0,w,h);
-    const grad=g.createLinearGradient(0,0,0,h);
-    grad.addColorStop(0,'rgba(255,255,255,0.30)'); grad.addColorStop(0.32,'rgba(255,255,255,0.06)');
-    grad.addColorStop(0.5,'rgba(0,0,0,0.06)'); grad.addColorStop(1,'rgba(0,0,0,0.30)');
-    g.fillStyle=grad; g.fillRect(0,0,w,h);
-    g.strokeStyle='rgba(0,0,0,0.32)'; g.lineWidth=3;
-    g.strokeRect(9,9,w-18,h-18);
-    g.beginPath(); g.moveTo(0,h*0.5); g.lineTo(w,h*0.5); g.stroke();
-    g.fillStyle='rgba(0,0,0,0.28)';
-    for(let i=0;i<8;i++){ g.beginPath(); g.arc(22+i*30,22,2.3,0,7); g.fill(); g.beginPath(); g.arc(22+i*30,h-22,2.3,0,7); g.fill(); }
-  });
-  paintCache[hex]=t; return t;
-}
+// (paintTex removed iter 32 — unused since the iter-22 hull rewrite)
 // chrome: horizontal reflection bands
 const chromeTex = makeCanvasTex(64,64,(g,w,h)=>{
   const grad=g.createLinearGradient(0,0,0,h);
@@ -6552,7 +6545,8 @@ let cowModel = null, cowClips = null;
     const raw = atob(window.COW_GLB_B64), buf = new Uint8Array(raw.length);
     for (let i=0;i<raw.length;i++) buf[i] = raw.charCodeAt(i);
     new THREE.GLTFLoader().parse(buf.buffer, '', function(gltf){
-      gltf.scene.traverse(function(o){ if(o.isMesh){ o.castShadow = true; o.frustumCulled = false; } });
+      gltf.scene.traverse(function(o){ if(o.isMesh){ o.castShadow = true; o.frustumCulled = false;
+        if(o.geometry) o.geometry.userData._shared = true; } });   // clones share these — never dispose
       cowModel = gltf.scene; cowClips = gltf.animations;
       upgradeStadium();   // parse order vs the farmer isn't guaranteed — each loader upgrades what it can
     }, function(err){ console.warn('cow model parse failed', err); });
@@ -6579,6 +6573,7 @@ function charClip(n){
     const raw = atob(window.CHAR_GLB_B64), buf = new Uint8Array(raw.length);
     for (let i=0;i<raw.length;i++) buf[i] = raw.charCodeAt(i);
     new THREE.GLTFLoader().parse(buf.buffer, '', function(gltf){
+      gltf.scene.traverse(function(o){ if(o.isMesh && o.geometry) o.geometry.userData._shared = true; });
       charModel = gltf.scene; charClips = gltf.animations;
       upgradeStadium();   // crowd spawns before this async parse lands — swap the box hicks in place
     }, function(err){ console.warn('farmer model parse failed', err); });
@@ -6758,6 +6753,34 @@ function buildVehicleMesh(typeId, teamColor){
   return g;
 }
 
+// ---------------- RESOURCE DISPOSAL ----------------
+// Cars, riders, tags, corpses, and ducks get rebuilt constantly; without disposal every rematch
+// and every duck flight leaks GPU buffers. Rules: glTF-source geometries are SHARED by clones
+// (flagged _shared at load) — never dispose those; module-level materials are shared — skip via
+// set; everything else (per-instance geometry, cloned/fresh materials, _ownTex canvas textures)
+// goes. material.dispose() never touches .map, so shared maps on cloned materials are safe.
+function disposeTree(root){
+  if(!root || typeof root.traverse !== 'function') return;   // headless stub: no-op
+  const shared = disposeTree._s || (disposeTree._s = new Set([chromeMat, steelMat, denimMat,
+    duckBodyM, duckHeadM, duckBillM, duckWingM]));
+  root.traverse(function(o){
+    if(!(o.isMesh || o.isSprite)) return;
+    // skinned clones each carry their own Skeleton whose GPU bone-matrix texture nothing else
+    // frees — the single biggest leak found (hundreds of textures across rematches/corpses/ducks)
+    if(o.isSkinnedMesh && o.skeleton){
+      if(typeof o.skeleton.dispose === 'function') o.skeleton.dispose();
+      else if(o.skeleton.boneTexture){ o.skeleton.boneTexture.dispose(); o.skeleton.boneTexture = null; }
+    }
+    if(o.geometry && !(o.geometry.userData && o.geometry.userData._shared)) o.geometry.dispose();
+    const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
+    for(const m of mats){
+      if(shared.has(m)) continue;
+      if(m.userData && m.userData._ownTex && m.map) m.map.dispose();
+      m.dispose();
+    }
+  });
+}
+
 // ---------------- CARS ----------------
 const TEAM_COLOR = [0x2b6fb8, 0xb8422b];
 const cars = [];
@@ -6778,6 +6801,7 @@ function makeCar(name, team, vehIdx, isPlayer){
     g.strokeStyle='#000'; g.lineWidth=6; g.strokeText(name,w/2,h/2); g.fillText(name,w/2,h/2);
   });
   const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map:tagTex, depthTest:false }));
+  tag.material.userData._ownTex = true;
   tag.scale.set(10,2.5,1);
   scene.add(tag);
 
@@ -7595,7 +7619,7 @@ document.getElementById('btn-lobby').onclick = ()=>{
 // ---------------- MATCH SETUP ----------------
 function startMatch(rematch){
   // clear old cars
-  for(const c of cars){ scene.remove(c.mesh); scene.remove(c.tag); }
+  for(const c of cars){ scene.remove(c.mesh); scene.remove(c.tag); disposeTree(c.mesh); disposeTree(c.tag); }
   cars.length = 0;
 
   const pname = (document.getElementById('player-name').value.trim() || 'Billy Bob').slice(0,16);
