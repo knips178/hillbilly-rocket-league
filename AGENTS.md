@@ -47,6 +47,10 @@ MA-rated redneck-comedy Rocket League clone, solo vs bots. One self-contained Th
 - Make the smallest useful change; avoid unrelated refactors and formatting churn.
 - **Verify before delivering:** `./verify.sh` (extract → `node --check` → smoke harness). Fix anything broken.
 - Update the `CHANGELOG` comment at the top of the HTML with the date + a bullet list of what changed.
+- **Ship every substantive iteration** (user mandate): commit with a descriptive message, `git push`
+  (origin = github.com/knips178/hillbilly-rocket-league), rebuild the artifact bundle, republish to
+  the same artifact URL. GitHub Pages (once enabled) serves the pushed file automatically —
+  https://knips178.github.io/hillbilly-rocket-league/ — controller + touch both work there (no iframe).
 
 ## Controls (durable — verified against source)
 
