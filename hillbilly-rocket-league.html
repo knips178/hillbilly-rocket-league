@@ -1,6 +1,16 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-19 iter 33 — review pass: bots actually hit the ball now]
+- REVIEW FIND (measured): bots-only play was near-dead — 1 ball touch/min in the barn, ball moving
+  just 11% of the time. Cause: attackers steered at an aim point 6u behind the ball and the
+  swing-around logic retargeted them right before contact, so they'd veer, whiff, and momentum
+  would fling 'em 100+ units across the arena. Distance traces showed the whiff loop plainly.
+- Fix: inside 16u of the ball an attacker COMMITS to the ball itself. After: 13 touches/min,
+  ball moving 96% of the time in the barn; the pond turns into proper ice-chaos hockey.
+- Bots also ease the throttle on ice when badly misaligned (grip<0.5) instead of sliding past
+  everything at full send.
+- AGENTS.md never-remove list updated: "TTS announcer" -> "announcer VO" (TTS is long gone).
 [2026-07-19 iter 32 — review pass: GPU resource leak fixed, dead code removed]
 - LEAK (review find, measured): every rematch leaked ~55 GPU textures + geometry buffers; ducks
   leaked geometries every flight; corpses too. Root causes: (1) nothing disposed removed objects,
@@ -7442,6 +7452,9 @@ function botInput(c, dt){
     if(meToGoal !== 0 && meToBall !== 0 && meToGoal !== meToBall && Math.abs(c.pos.x-ball.pos.x)<20){
       target = ball.pos.clone(); target.z += (c.pos.z>ball.pos.z? 14 : -14); target.x += (ownGoalX>0?12:-12);
     }
+    // in strike range, quit steering at waypoints and COMMIT to the ball — the old aim-point
+    // logic made bots veer off right before contact, whiff, and fly clean across the barn
+    if(c.pos.distanceTo(ball.pos) < 16) target = ball.pos.clone();
   } else {
     // rotate back: sit between own goal and ball
     target = new THREE.Vector3(ownGoalX*0.75, 0, ball.pos.z*0.35);
@@ -7463,6 +7476,9 @@ function botInput(c, dt){
   while(diff< -Math.PI) diff += Math.PI*2;
   input.steer = THREE.MathUtils.clamp(diff*2.5, -1, 1);
   input.throttle = Math.abs(diff) > 2.4 ? 0.4 : 1;
+  // low-grip smarts: on ice the hicks ease off when they ain't pointed right, else they
+  // slide clean past everything and the pond turns into bumper bowling
+  if(SURF.grip < 0.5 && Math.abs(diff) > 0.5) input.throttle *= 0.45;
 
   // boost heuristics
   const aligned = Math.abs(diff) < 0.25;

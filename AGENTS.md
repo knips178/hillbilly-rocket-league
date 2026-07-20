@@ -34,7 +34,7 @@ MA-rated redneck-comedy Rocket League clone, solo vs bots. One self-contained Th
   async parse callback; anything spawned at startMatch (riders) can check `charModel` directly.
 - Keep the MA-rated hillbilly-humor tone (profanity fine, **no slurs**).
 - Never remove existing features: lobby, bots, PS5-controller support (incl. menu navigation),
-  TTS announcer, mute keys (M/V), demolitions, the four arenas (Barn / Frozen Pond / Skeeter Bog /
+  announcer VO (real recorded clips — TTS is long gone), mute keys (M/V), demolitions, the four arenas (Barn / Frozen Pond / Skeeter Bog /
   Mallard Marsh — iters 24-25; same pitch bounds, different SURF physics + look; Bog + Marsh are
   OPEN-AIR via the toggleable barnShell group; Marsh has duck flights gettin' shot from the blinds;
   the Frozen Pond look is user-APPROVED — don't restyle it; harness menu-nav counts 6 lobby rows).
