@@ -71,6 +71,14 @@ mqtt/dist/mqtt.esm.js:
   <button data-s="torrent">BitTorrent</button>
 </div>
 
+<label>TURN relay (optional — only if you set one up)</label>
+<input id="turn-url" placeholder="turn:… server address" style="font-size:13px;letter-spacing:0;font-weight:normal">
+<div class="row" style="margin-top:6px">
+  <input id="turn-user" placeholder="username" style="font-size:13px;letter-spacing:0;font-weight:normal">
+  <input id="turn-cred" placeholder="credential" style="font-size:13px;letter-spacing:0;font-weight:normal">
+</div>
+<div class="note">Stays in this browser only — it is never sent anywhere but your own connection.</div>
+
 <label>Room code — identical on both devices</label>
 <input id="room" value="HRLTEST" autocapitalize="characters" autocomplete="off" spellcheck="false">
 
@@ -86,7 +94,7 @@ const NOSTR_RELAYS=['wss://relay.damus.io','wss://nos.lol','wss://relay.primal.n
 const LOOPBACK=new URLSearchParams(location.search).has('loopback');
 const TEST_SECS=70;
 let STRAT='nostr';
-const BUILD='v4';
+const BUILD='v5';
 
 // Trystero ships exactly ONE default STUN server (stun.cloudflare.com), which
 // returned ICE error 701 (unreachable) on the real test network -- so no srflx
@@ -101,6 +109,21 @@ const ICE_SERVERS=[
 ];
 
 document.getElementById('build').textContent='build '+BUILD;
+['turn-url','turn-user','turn-cred'].forEach(id=>{
+  const el=document.getElementById(id);
+  el.value=localStorage.getItem('hrl-'+id)||'';
+  el.oninput=()=>localStorage.setItem('hrl-'+id,el.value.trim());
+});
+function turnServers(){
+  const u=document.getElementById('turn-url').value.trim();
+  if(!u) return [];
+  return [{urls:u, username:document.getElementById('turn-user').value.trim(),
+           credential:document.getElementById('turn-cred').value.trim()}];
+}
+// Same public IP on both devices => same network, so a failure here is hairpin
+// NAT, not symmetric NAT. Hashed so the raw address is never pasted around.
+function ipHash(ip){ let h=0; for(let i=0;i<ip.length;i++){h=(h*31+ip.charCodeAt(i))|0;} 
+  return (h>>>0).toString(36).slice(0,6); }
 const q=new URLSearchParams(location.search);
 if(q.get('r')) document.getElementById('room').value=q.get('r').toUpperCase();
 if(q.get('s')&&LABEL[q.get('s')]) STRAT=q.get('s');
@@ -145,7 +168,7 @@ window.RTCPeerConnection=function(cfg){
 };
 window.RTCPeerConnection.prototype=_PC.prototype; Object.assign(window.RTCPeerConnection,_PC);
 
-const RES={peers:0,everPeer:0,rtt:[],rttN:0,ice:'',err:'',candTypes:{},stunOk:{}};
+const RES={peers:0,everPeer:0,rtt:[],rttN:0,ice:'',err:'',candTypes:{},stunOk:{},pubIP:'',turnOk:0};
 
 function render(final){
   const st=document.getElementById('status'), kv=document.getElementById('kv');
@@ -170,6 +193,8 @@ function render(final){
     'ice route  : '+(RES.ice||'—')+'\n'+
     'my cands   : '+(Object.keys(RES.candTypes).join(',')||'—')+'\n'+
     'stun ok    : '+(Object.keys(RES.stunOk).join(' ')||'—')+'\n'+
+    'network id : '+(RES.pubIP||'—')+'   (same on both = SAME network)\n'+
+    'turn relay : '+(turnServers().length?(RES.turnOk?'WORKING':'configured, no relay candidate'):'not configured')+'\n'+
     'pc states  : '+JSON.stringify(P.states)+'\n'+
     'pc created : '+P.created+
     (RES.err?'\nerror      : '+RES.err:'')+
@@ -184,7 +209,7 @@ document.getElementById('go').onclick=()=>{
 
   let r;
   try{
-    const cfg={appId:'hrl-conn-test-v1', rtcConfig:{iceServers:ICE_SERVERS}};
+    const cfg={appId:'hrl-conn-test-v1', rtcConfig:{iceServers:ICE_SERVERS.concat(turnServers())}};
     if(STRAT==='nostr') cfg.relayConfig={urls:NOSTR_RELAYS,redundancy:4};
     if(LOOPBACK) cfg._test_only_mdnsHostFallbackToLoopback=true;
     r=HRLNet[STRAT](cfg,room);
@@ -192,10 +217,12 @@ document.getElementById('go').onclick=()=>{
 
   // what kinds of candidate can this network even produce? (srflx missing => STUN blocked)
   try{
-    const probe=new _PC({iceServers:ICE_SERVERS});
+    const probe=new _PC({iceServers:ICE_SERVERS.concat(turnServers())});
     probe.createDataChannel('p');
     probe.onicecandidate=e=>{ if(e.candidate){ RES.candTypes[e.candidate.type||'?']=1;
-      if(e.candidate.type==='srflx'&&e.candidate.url) RES.stunOk[e.candidate.url]=1; } else probe.close(); };
+      if(e.candidate.type==='srflx'){ if(e.candidate.url) RES.stunOk[e.candidate.url]=1;
+        if(e.candidate.address) RES.pubIP=ipHash(e.candidate.address); }
+      if(e.candidate.type==='relay') RES.turnOk=1; } else probe.close(); };
     probe.createOffer().then(o=>probe.setLocalDescription(o));
     setTimeout(()=>{try{probe.close()}catch(e){}},9000);
   }catch(e){}
