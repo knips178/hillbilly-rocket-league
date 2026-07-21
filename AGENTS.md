@@ -91,6 +91,13 @@ the AI, so **bot-fill is the solo code path** and a dropped player reverts to a 
    testing only, Trystero exposes `_test_only_mdnsHostFallbackToLoopback: true`.
 7. **Free anonymous TURN is gone** — the old public `openrelay.metered.ca` credentials gather zero
    relay candidates. A TURN fallback needs an account. Only ONE side of a pair needs TURN.
+8. **TURN is CONFIRMED WORKING end-to-end** (Metered free tier, regional endpoint
+   `turn:na.relay.metered.ca:80`; the hostname is shared, only username/credential are per-account).
+   Full path proven: Nostr matchmaking → STUN → TURN relay → bidirectional data.
+   **Measured RTT over the relay: avg 122 ms, p95 250 ms.** That is the worst case and it is why the
+   local car MUST be client-predicted; do not ship a build where your own car waits on the host.
+   Bandwidth over the relay is ~5 MB per 5-minute match, so the free 20 GB/month is not a constraint.
+   Credentials are NOT in the repo yet — decide deliberately where they live, since the repo is public.
 
 ## Workflow (surgical)
 
