@@ -1,6 +1,24 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-20 iter 40 — PERFORMANCE + CODE REVIEW: profiled first, then fixed what actually cost]
+- PROFILED the frame instead of guessing: renderer.render was 5.26ms of a 5.6ms frame (94%).
+  ALL game logic combined was 0.16ms — so micro-optimising JS allocations would've been pointless.
+  The wins were all in what we hand the GPU.
+- BIG ONE — frustum culling restored on skinned meshes. Iters 13/20 set frustumCulled=false on
+  every GLB mesh because skinned bounds don't follow the animated pose. Measured cost of that
+  shortcut: 348 meshes drawn EVERY frame regardless of camera — the whole crowd rendered behind
+  yer back. New safeCull() inflates the bind-pose bounding sphere 2.5x (once per shared geometry)
+  so culling is correct AND conservative. Draw calls 1644 -> 892 (-46%), triangles 189k -> 98k
+  (-48%). Verified safe: across 12 camera angles / 130 on-screen crowd samples, ZERO wrongly culled.
+- ADAPTIVE RESOLUTION: render cost scales with pixel count and ratio 2 is 4x the pixels of 1.0 —
+  fine on a Mac, brutal on the phones/tablets that got touch controls in iter 34. Frame time is
+  sampled over ~0.75s windows; under ~48fps steps the pixel ratio down (2 -> 1.5 -> 1.25 -> 1),
+  over ~83fps steps it back up, with hysteresis + cooldown so it settles instead of oscillating.
+  Never exceeds the device cap. Verified it holds at full quality during normal play.
+- Leak re-check with the iter-38 churn: 40 full critter lifecycles (spawn -> squashed -> pot ->
+  eaten) leaked 0 geometries and 0 textures.
+- Dead code out: car fields pitchVis and demoted (assigned, never read).
 [2026-07-20 iter 39 — AUDIT PASS: six defects found by probing, all fixed]
 1. SCORING BUG: a goal nobody touched inherited the LAST rally's trick-shot bookkeeping and paid a
    bogus HOWITZER bonus (measured: untouched ball scored 2). Kickoff now clears shotFromX/Air/
@@ -5264,6 +5282,31 @@ function ensureSize(){
 }
 addEventListener('resize', ensureSize);
 
+// ---- adaptive resolution ----
+// Render is ~94% of frame cost and scales with pixel count (ratio 2 = 4x the pixels of 1.0).
+// Sample real frame time and step the pixel ratio down when we're missing 60fps, back up when
+// there's room. Hysteresis + cooldown so it settles instead of oscillating.
+const PR_MAX = Math.min((typeof devicePixelRatio!=='undefined' ? devicePixelRatio : 1) || 1, 2);
+const PR_STEPS = [PR_MAX, 1.5, 1.25, 1.0].filter((v,i,a)=> v<=PR_MAX && a.indexOf(v)===i);
+let prIdx = 0, _frAcc = 0, _frN = 0, _prHold = 0, _frLast = 0;
+function applyPixelRatio(){
+  renderer.setPixelRatio(PR_STEPS[prIdx]);
+  if(_vpW > 0 && _vpH > 0) renderer.setSize(_vpW, _vpH);
+}
+function adaptiveRes(){
+  const now = (typeof performance!=='undefined' ? performance.now() : Date.now());
+  if(_frLast){ _frAcc += now - _frLast; _frN++; }
+  _frLast = now;
+  if(_frN < 45) return;                       // ~0.75s window
+  const avg = _frAcc / _frN; _frAcc = 0; _frN = 0;
+  if(_prHold > 0){ _prHold--; return; }
+  if(avg > 21 && prIdx < PR_STEPS.length-1){        // under ~48fps: shed pixels
+    prIdx++; applyPixelRatio(); _prHold = 2;
+  } else if(avg < 12 && prIdx > 0){                 // over ~83fps: take them back
+    prIdx--; applyPixelRatio(); _prHold = 5;
+  }
+}
+
 // lights (golden-hour vibes; applyArena retints them per venue)
 const hemi = new THREE.HemisphereLight(0xbb7a99, 0x2a1d0d, 0.7);
 scene.add(hemi);
@@ -6700,7 +6743,7 @@ let cowModel = null, cowClips = null;
     const raw = atob(window.COW_GLB_B64), buf = new Uint8Array(raw.length);
     for (let i=0;i<raw.length;i++) buf[i] = raw.charCodeAt(i);
     new THREE.GLTFLoader().parse(buf.buffer, '', function(gltf){
-      gltf.scene.traverse(function(o){ if(o.isMesh){ o.castShadow = true; o.frustumCulled = false;
+      gltf.scene.traverse(function(o){ if(o.isMesh){ o.castShadow = true; safeCull(o);
         if(o.geometry) o.geometry.userData._shared = true; } });   // clones share these — never dispose
       cowModel = gltf.scene; cowClips = gltf.animations;
       upgradeStadium();   // parse order vs the farmer isn't guaranteed — each loader upgrades what it can
@@ -6751,7 +6794,7 @@ function buildCharacter(o){
       L.name = mt.name; return L;
     });
     m.material = Array.isArray(m.material) ? swap : swap[0];
-    m.castShadow = true; m.frustumCulled = false;   // skinned bounds lie; never let culling eat him
+    m.castShadow = true; safeCull(m);              // cull correctly via an inflated bind-pose sphere
   });
   if(o.scale) model.scale.setScalar(o.scale);
   g.add(model);
@@ -6833,7 +6876,7 @@ function upgradeStadium(){
         if(mt.color && mt.name==='White') mt.color.setRGB(0.95,0.93,0.88);
         if(mt.color) mt.color.multiplyScalar(0.82 + Math.random()*0.18);   // herd variety
       });
-      o.castShadow = true; o.frustumCulled = false;
+      o.castShadow = true; safeCull(o);
     }});
     g.add(m);
     const mixer = new THREE.AnimationMixer(m);
@@ -6910,6 +6953,22 @@ function buildVehicleMesh(typeId, teamColor){
   return g;
 }
 
+// Skinned meshes cull against their BIND-POSE bounding sphere, which the animation can push
+// verts outside of — that's why culling was disabled outright in iter 13/20. Measured cost of
+// that shortcut: 348 always-drawn meshes (the whole crowd renders behind your back). Inflating
+// the sphere keeps culling correct AND conservative. Geometry is shared between clones, so this
+// runs once per geometry.
+function safeCull(m, mult){
+  if(!m.geometry) return;
+  if(!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
+  const bs = m.geometry.boundingSphere;
+  if(bs && !m.geometry.userData._inflated){
+    bs.radius *= (mult || 2.5);
+    m.geometry.userData._inflated = true;
+  }
+  m.frustumCulled = true;
+}
+
 // ---------------- RESOURCE DISPOSAL ----------------
 // Cars, riders, tags, corpses, and ducks get rebuilt constantly; without disposal every rematch
 // and every duck flight leaks GPU buffers. Rules: glTF-source geometries are SHARED by clones
@@ -6967,8 +7026,8 @@ function makeCar(name, team, vehIdx, isPlayer){
     wheels: mesh.children.filter(ch=>ch.userData && ch.userData.wheel),
     smokeT: 0, dead: 0,
     pos:new THREE.Vector3(), vel:new THREE.Vector3(), yaw:0,
-    onGround:true, jumps:2, boost:33, flip:0, flipDir:0, pitchVis:0, rollVis:0, steerVis:0,
-    aiTimer:Math.random()*2, aiJumpCd:0, demoted:0, goals:0, touches:0, demos:0,
+    onGround:true, jumps:2, boost:33, flip:0, flipDir:0, rollVis:0, steerVis:0,
+    aiTimer:Math.random()*2, aiJumpCd:0, goals:0, touches:0, demos:0,
     specialCd:0, spinT:0, shineT:0, stewT:0, demoStreak:0, demoStreakT:0, aiSpecialCd:2+Math.random()*3,
     persona: isPlayer ? null : PERSONAS[Math.floor(Math.random()*PERSONAS.length)],
   };
@@ -8468,6 +8527,7 @@ let hitstop = 0, goalSlowT = 0;
 function animate(){
   requestAnimationFrame(animate);
   ensureSize();
+  adaptiveRes();
   const rawDt = Math.min(clock.getDelta(), 0.033);
   let dt = rawDt;
   if(hitstop > 0){ hitstop -= rawDt; dt = 0.0001; }

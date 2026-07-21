@@ -38,7 +38,10 @@ MA-rated redneck-comedy Rocket League clone, solo vs bots. One self-contained Th
   Mallard Marsh — iters 24-25; same pitch bounds, different SURF physics + look; Bog + Marsh are
   OPEN-AIR via the toggleable barnShell group; Marsh has duck flights gettin' shot from the blinds;
   the Frozen Pond look is user-APPROVED — don't restyle it; harness menu-nav counts 6 lobby rows).
-- 60fps target.
+- 60fps target. Rendering is ~94% of frame cost (profiled iter 40) — optimise DRAW CALLS and pixel
+  count, not JS. Do NOT set frustumCulled=false on skinned meshes (it forced 348 always-drawn
+  meshes); use safeCull() which inflates the bind-pose sphere instead. Adaptive resolution scales
+  the pixel ratio to protect weak/mobile GPUs — leave it in.
 - Gameplay-variety systems (iter 36) — keep all five: per-vehicle SPECIAL moves (E/F · ▢ · touch⚡,
   see VEHICLES[].special), MAW'S WILDCARD modifiers (WILDCARDS[], bend the mutable globals
   gravCarMul/gravBallMul/gripMul/topMul/boostFree/BALL_R), the MOONSHINE JUG pickup, demolition
