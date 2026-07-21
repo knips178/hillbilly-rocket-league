@@ -39,6 +39,11 @@ MA-rated redneck-comedy Rocket League clone, solo vs bots. One self-contained Th
   OPEN-AIR via the toggleable barnShell group; Marsh has duck flights gettin' shot from the blinds;
   the Frozen Pond look is user-APPROVED — don't restyle it; harness menu-nav counts 6 lobby rows).
 - 60fps target.
+- Gameplay-variety systems (iter 36) — keep all five: per-vehicle SPECIAL moves (E/F · ▢ · touch⚡,
+  see VEHICLES[].special), MAW'S WILDCARD modifiers (WILDCARDS[], bend the mutable globals
+  gravCarMul/gravBallMul/gripMul/topMul/boostFree/BALL_R), the MOONSHINE JUG pickup, demolition
+  boost+streak rewards, and boost-assisted AERIALS. Goal mouth is goalHalfW 18 / goalH 13 (harness
+  recess asserts track these). Ball-floating wildcards MUST stay scorable — don't over-float them.
 
 ## Workflow (surgical)
 

@@ -1,6 +1,25 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-19 iter 36 — GAMEPLAY VARIETY: 5 systems for fun, per user goal]
+Five on-theme systems, each dialed in-browser for feel (not guessed):
+1. SIGNATURE VEHICLE MOVES (E/F key · ▢ pad · touch ⚡): every ride plays distinctly now.
+   Nitro Till (aimed dash-shot, SCORES from range), Backfire (radial scatter/defense), Blade Spin
+   (360° whack + visual spin), Stampede (heavy aimed shot), Bull Rush (leap + forward-up lob for
+   aerials). 6s cooldown, HUD readiness pip, shown on lobby cards. Aimed specials verified to score
+   from 8-35u out; utility ones scatter cars/ball. Bots fire them too.
+2. MAW'S WILDCARD: announced match modifiers rotate (~13s each, 32-52s apart, ~23% uptime) — Gravy
+   Time (low grav), Greased Lightnin' (slippery+fast), Hawg Wild (free boost for all), Hawg Ball
+   (1.6x ball). Ball-floating cards tuned to stay SCORABLE (early too-floaty ones killed scoring).
+3. MOONSHINE JUG: a glowing XXX jug spawns midfield every ~20s; grab it for 6s of unlimited shine
+   (full boost + 1.25x top speed + gold sparkle). "SHINE RUN!"
+4. DEMO REWARDS: a demolition refills your tank AND builds a rampage streak with escalating
+   callouts (DOUBLE TROUBLE / HOG WILD / PLUMB UNSTOPPABLE / CALL THE LAW).
+5. AERIALS: holding boost airborne now LIFTS ya (45 up > 34 gravity) — jump + boost climbs ~20u to
+   smack high balls. Real aerial play (RL mandate).
+Also: goal mouth widened (goalHalfW 15->18, goalH 12->13 — bigger barn doors, more scoring:
+bots ~1.7 goals + 4.3 demos per 2min, up from ~1). Physics globals made mutable for wildcards;
+GPU-safe (shared glTF geoms untouched). Measured ~4ms/frame with everything live.
 [2026-07-19 iter 35 — riders sized right: drivers/cow-riders match the crowd, per user report]
 - The folks driving looked shrunk: tractor drivers rode at scale 1.3 and cow riders at 1.15 while
   the standing crowd is 1.75, so a driver measured 2.41u tall vs a spectator's 3.25u — a 74%-size
@@ -389,6 +408,8 @@ STILL TO DO (ideas for future iterations):
   }
   .vcard:hover { transform:translateY(-3px) scale(1.02); border-color:#ffb347; box-shadow:0 8px 18px rgba(0,0,0,.5); }
   .vcard.sel { border-color:#ffb347; background:rgba(58,40,16,0.9); box-shadow:0 0 16px #ffb34755; }
+  .vspecial { margin-top:6px; font-size:11px; font-weight:bold; letter-spacing:1px; color:#c8ff9a;
+    border-top:1px solid rgba(168,255,112,.2); padding-top:5px; }
   .vname { font-weight:bold; color:#ffd98a; font-size:15px; }
   .vflavor { font-size:11px; color:#bd9c6b; font-style:italic; margin:4px 0 8px; min-height:40px; }
   .stat { font-size:10px; color:#9c8358; text-transform:uppercase; letter-spacing:1px; }
@@ -430,6 +451,7 @@ STILL TO DO (ideas for future iterations):
   .tbtn:active { background:rgba(255,179,71,.35); }
   #tb-jump  { right:5vw;  bottom:12vh; width:20vmin; height:20vmin; max-width:110px; max-height:110px; font-size:min(4.5vmin,24px); }
   #tb-boost { right:20vw; bottom:22vh; width:16vmin; height:16vmin; max-width:90px; max-height:90px; font-size:min(3.6vmin,19px); }
+  #tb-special { right:26vw; bottom:12vh; width:15vmin; height:15vmin; max-width:84px; max-height:84px; font-size:min(5vmin,30px); border-color:rgba(168,255,112,.7); color:#c8ff9a; }
   #tb-cam   { right:6vw;  bottom:34vh; width:11vmin; height:11vmin; max-width:64px; max-height:64px; font-size:min(3vmin,15px); }
   #tb-pause { right:3vw;  top:3vh;     width:10vmin; height:10vmin; max-width:56px; max-height:56px; font-size:min(3vmin,16px); }
   /* touch devices: hide the keyboard help, un-collide HUD widgets from thumbs */
@@ -457,6 +479,10 @@ STILL TO DO (ideas for future iterations):
   }
   #boost-ring > div { width:82px; height:82px; border-radius:50%; background:#151008cc; color:#ffd98a; font-size:26px; font-weight:bold; display:flex; align-items:center; justify-content:center; flex-direction:column; }
   #boost-ring small { font-size:9px; letter-spacing:2px; color:#9c8358; }
+  #special-ind { margin-top:8px; text-align:center; font-size:12px; letter-spacing:1px; color:#7c6a48;
+    background:rgba(21,16,8,0.55); border:1px solid rgba(255,179,71,0.2); border-radius:8px; padding:4px 8px; transition:all .2s; }
+  #special-ind.ready { color:#c8ff9a; border-color:rgba(168,255,112,.6); box-shadow:0 0 12px rgba(168,255,112,.35); }
+  #special-key { display:inline-block; min-width:16px; padding:0 4px; border:1px solid currentColor; border-radius:4px; font-weight:bold; }
   #speedo { position:absolute; left:28px; bottom:26px; color:#f2e2c4; font-size:14px; background:rgba(21,16,8,0.68); padding:8px 14px; border-radius:8px;
     backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); border:1px solid rgba(255,179,71,0.25); }
   #announcer {
@@ -570,6 +596,7 @@ STILL TO DO (ideas for future iterations):
     <div id="tstick"><div id="tstick-nub"></div></div>
     <button class="tbtn" id="tb-jump">JUMP</button>
     <button class="tbtn" id="tb-boost">BOOST</button>
+    <button class="tbtn" id="tb-special">⚡</button>
     <button class="tbtn" id="tb-cam">CAM</button>
     <button class="tbtn" id="tb-pause">II</button>
   </div>
@@ -578,12 +605,14 @@ STILL TO DO (ideas for future iterations):
     <div id="clock">5:00</div>
     <div class="score-team score-red"><span class="tname">Roadkill</span><span id="score-red">0</span></div>
   </div>
-  <div id="boost-wrap"><div id="boost-ring"><div><span id="boost-num">33</span><small>SHINE</small></div></div></div>
+  <div id="boost-wrap"><div id="boost-ring"><div><span id="boost-num">33</span><small>SHINE</small></div></div>
+    <div id="special-ind"><span id="special-key">E</span> <span id="special-name">SPECIAL</span></div>
+  </div>
   <div id="speedo">0 mph</div>
   <div id="announcer"></div>
   <div id="countdown"></div>
   <div id="chat"></div>
-  <div id="controls-hint">W/S drive &nbsp; A/D steer<br>SPACE jump ×2 flip<br>SHIFT boost &nbsp; C ball-cam<br>ESC pause · M mute · V announcer<br><br>🎮 R2 gas · L2 reverse · stick steer<br>✕ jump ×2 flip · ◯/R1 boost<br>△ ball-cam · OPTIONS pause</div>
+  <div id="controls-hint">W/S drive &nbsp; A/D steer<br>SPACE jump ×2 flip<br>SHIFT boost (hold in air = fly!)<br><b style="color:#c8ff9a">E / F — SPECIAL MOVE</b><br>C ball-cam · ESC pause · M mute · V announcer<br><br>🎮 R2 gas · L2 reverse · stick steer<br>✕ jump ×2 flip · ◯/R1 boost · ▢ special<br>△ ball-cam · OPTIONS pause</div>
 </div>
 
 <!-- ==================== END/PAUSE SCREEN ==================== -->
@@ -4747,18 +4776,21 @@ STILL TO DO (ideas for future iterations):
    ============================================================ */
 
 // ---------------- CONSTANTS ----------------
-const ARENA = { halfX: 82, halfZ: 52, wallH: 26, ceil: 38, goalHalfW: 15, goalH: 12, goalDepth: 26 };
-const BALL_R = 4.4;
+const ARENA = { halfX: 82, halfZ: 52, wallH: 26, ceil: 38, goalHalfW: 18, goalH: 13, goalDepth: 26 };
+const BALL_R0 = 4.4;
+let BALL_R = 4.4;                       // live radius — Maw's "HAWG BALL" wildcard swells it
 const GRAV_CAR = -34, GRAV_BALL = -24;
 const CAR_COLL_R = 3.0;
 const SUPERSONIC = 46;
+// live gameplay-modifier multipliers (Maw's Wildcards bend these; 1 = normal)
+let gravCarMul = 1, gravBallMul = 1, gripMul = 1, topMul = 1, boostFree = false;
 
 const VEHICLES = [
-  { id:'pickup',  name:'Deere John',        flavor:'Ride-on mower that cuts grass, corners, and grudges. Duct tape and pure spite.', top:44, accel:38, turn:2.6, power:1.0, scale:1.0 },
-  { id:'muscle',  name:'Turbo Trimmer',     flavor:'Souped-up zero-turn. Idles like a chainsaw, corners like a threat.',           top:50, accel:42, turn:2.2, power:0.9, scale:0.95 },
-  { id:'mower',   name:'Grass Assassin',    flavor:'Zero-turn ridin\' mower. Cuts grass, cuts corners, cuts you off.',            top:38, accel:36, turn:3.4, power:0.8, scale:0.85 },
-  { id:'monster', name:'Big Bessie',        flavor:'A 2,000-lb heifer with a hick in the saddle. Moo-ves the ball AND the earth.', top:41, accel:32, turn:2.0, power:1.35, scale:1.25 },
-  { id:'tractor', name:'Sir Loin',          flavor:'Grandpa\'s prize steer, saddled up. Slower than molasses, hits like a stampede.', top:36, accel:30, turn:2.1, power:1.5, scale:1.15 },
+  { id:'pickup',  name:'Deere John',        flavor:'Ride-on mower that cuts grass, corners, and grudges. Duct tape and pure spite.', top:44, accel:38, turn:2.6, power:1.0, scale:1.0,  special:'dash',     specialName:'NITRO TILL' },
+  { id:'muscle',  name:'Turbo Trimmer',     flavor:'Souped-up zero-turn. Idles like a chainsaw, corners like a threat.',           top:50, accel:42, turn:2.2, power:0.9, scale:0.95, special:'backfire', specialName:'BACKFIRE' },
+  { id:'mower',   name:'Grass Assassin',    flavor:'Zero-turn ridin\' mower. Cuts grass, cuts corners, cuts you off.',            top:38, accel:36, turn:3.4, power:0.8, scale:0.85, special:'spin',     specialName:'BLADE SPIN' },
+  { id:'monster', name:'Big Bessie',        flavor:'A 2,000-lb heifer with a hick in the saddle. Moo-ves the ball AND the earth.', top:41, accel:32, turn:2.0, power:1.35, scale:1.25, special:'stampede', specialName:'STAMPEDE' },
+  { id:'tractor', name:'Sir Loin',          flavor:'Grandpa\'s prize steer, saddled up. Slower than molasses, hits like a stampede.', top:36, accel:30, turn:2.1, power:1.5, scale:1.15, special:'bullrush', specialName:'BULL RUSH' },
 ];
 
 const BOT_NAMES = ['Cletus','Bobby Ray','Skeeter','Darlene','Junior','Rooster','Tammy Lynn','Earl','Peanut','Doyle'];
@@ -4886,7 +4918,8 @@ let SURF = ARENAS_DEF[0].surf;
     el.className = 'vcard' + (i===0?' sel':'');
     const bars = [ ['Speed', v.top/50], ['Grip', v.turn/3.4], ['Wallop', v.power/1.5] ]
       .map(([n,p])=>`<div class="stat">${n}</div><div class="bar"><div style="width:${Math.round(p*100)}%"></div></div>`).join('');
-    el.innerHTML = `<div class="vname">${v.name}</div><div class="vflavor">${v.flavor}</div>${bars}`;
+    el.innerHTML = `<div class="vname">${v.name}</div><div class="vflavor">${v.flavor}</div>${bars}`
+      + `<div class="vspecial">⚡ ${v.specialName}</div>`;
     el.onclick = ()=>{ document.querySelectorAll('.vcard').forEach(c=>c.classList.remove('sel')); el.classList.add('sel'); lobby.vehicle=i; };
     list.appendChild(el);
   });
@@ -6873,6 +6906,7 @@ function makeCar(name, team, vehIdx, isPlayer){
     pos:new THREE.Vector3(), vel:new THREE.Vector3(), yaw:0,
     onGround:true, jumps:2, boost:33, flip:0, flipDir:0, pitchVis:0, rollVis:0, steerVis:0,
     aiTimer:Math.random()*2, aiJumpCd:0, demoted:0, goals:0, touches:0, demos:0,
+    specialCd:0, spinT:0, shineT:0, demoStreak:0, demoStreakT:0, aiSpecialCd:2+Math.random()*3,
   };
   cars.push(car);
   return car;
@@ -6890,9 +6924,170 @@ function kickoffSpots(team){
 }
 // NOTE: yaw convention: forward = (sin yaw, 0, cos yaw). To face +X, yaw = PI/2. To face -X, yaw = -PI/2.
 
+// ================= GAMEPLAY VARIETY (iter 36) =================
+// Five on-theme systems for match-to-match variety: per-vehicle special moves, Maw's Wildcard
+// modifiers, a Moonshine Jug power-up, demolition boost/streak rewards, and boost-assisted aerials.
+const SPECIAL_CD = 6;   // seconds between a vehicle's signature move
+
+// shared radial impulse: shoves the ball (and cars) away from a point. Credits `who` for goals.
+function shockwave(pos, radius, ballPow, carPow, upBias, who){
+  const db = ball.pos.clone().sub(pos); db.y *= 0.6;
+  const d = db.length();
+  if(d < radius + BALL_R){
+    const n = d > 0.01 ? db.multiplyScalar(1/d) : new THREE.Vector3(0,1,0);
+    ball.vel.addScaledVector(n, ballPow); ball.vel.y += upBias;
+    if(who){ ball.lastTouch = who; who.touches++; }
+  }
+  for(const o of cars){
+    if(o === who || o.dead > 0) continue;
+    const dc = o.pos.clone().sub(pos); dc.y = 0;
+    const dd = dc.length();
+    if(dd > 0.01 && dd < radius){
+      const n = dc.multiplyScalar(1/dd), fall = 1 - dd/radius;
+      o.vel.addScaledVector(n, carPow*fall);
+      o.vel.y = Math.max(o.vel.y, upBias*0.6*fall + 6);
+      o.onGround = false;
+      // a special that connects supersonic-hard still demos, like a real hit
+      if(carPow*fall > SUPERSONIC && game.state==='play') demolish(o, who);
+    }
+  }
+  // ring of sparks
+  for(let i=0;i<16;i++){ const a=(i/16)*Math.PI*2;
+    spawnGlow(pos.x+Math.cos(a)*2, pos.y+0.6, pos.z+Math.sin(a)*2,
+      Math.cos(a)*14, 5+Math.random()*4, Math.sin(a)*14, 0xffe08a, 0.4, 1.1, -6); }
+}
+
+// aimed "power shot": if the ball's in range, fire it in the way the car's pointed (blended toward
+// the ball so glancing angles curve). Overrides the ball velocity so offensive specials SCORE.
+function ballKick(c, radius, power, up){
+  const f = carForward(c);
+  const toBall = ball.pos.clone().sub(c.pos);
+  if(toBall.length() > radius + BALL_R) return false;
+  const dir = f.clone().multiplyScalar(0.75).add(toBall.setY(0).normalize().multiplyScalar(0.45));
+  if(dir.lengthSq() < 0.01) dir.copy(f);
+  dir.normalize();
+  ball.vel.set(dir.x*power, Math.max(ball.vel.y, up), dir.z*power);
+  ball.lastTouch = c; c.touches++;
+  spawnGlow(ball.pos.x, ball.pos.y, ball.pos.z, dir.x*10, 6, dir.z*10, 0xfff2c0, 0.4, 1.4, -6);
+  return true;
+}
+function useSpecial(c){
+  if(!c || c.dead > 0 || c.specialCd > 0 || game.paused) return;
+  if(game.state !== 'play' && game.state !== 'countdown') return;
+  c.specialCd = SPECIAL_CD;
+  const f = carForward(c);
+  const ahead = c.pos.clone().addScaledVector(f, 4);
+  switch(c.veh.special){
+    case 'dash':      // Nitro Till — free forward burst + an aimed poke
+      c.vel.x += f.x*36; c.vel.z += f.z*36; c.vel.y = Math.max(c.vel.y, c.onGround?0:5);
+      ballKick(c, 11, 52, 7);
+      for(let i=0;i<10;i++) spawnGlow(c.pos.x-f.x*2, 1+Math.random(), c.pos.z-f.z*2,
+        -f.x*(12+Math.random()*8), Math.random()*4, -f.z*(12+Math.random()*8), 0xff8a1e, 0.3, 1.0, -4);
+      beep(140,0.18,'sawtooth',0.09,60); break;
+    case 'backfire':  // Turbo Trimmer — radial blast that scatters everything (defensive)
+      shockwave(c.pos, 15, 46, 34, 9, c);
+      c.vel.addScaledVector(f, -10); boom();
+      burst(new THREE.Vector3(c.pos.x, c.pos.y+1.5, c.pos.z), 0xffb020, 30, 20); break;
+    case 'spin':      // Grass Assassin — spin the blades, whack all around
+      c.spinT = 0.6; shockwave(c.pos, 12, 34, 26, 5, c);
+      beep(90,0.5,'square',0.07,900); break;
+    case 'stampede':  // Big Bessie — heavy charge + a bruising aimed shot
+      c.vel.x += f.x*30; c.vel.z += f.z*30;
+      shockwave(ahead, 11, 0, 40, 6, c);   // ball handled by the kick below
+      ballKick(c, 13, 60, 9);
+      cowMoo(); thump(0.9); break;
+    case 'bullrush':  // Sir Loin — leap and slam, lobbing the ball forward-and-up (aerial setup)
+      c.vel.y = 15; c.onGround = false; c.jumps = 0;
+      shockwave(c.pos, 13, 0, 22, 20, c);
+      ballKick(c, 13, 48, 16);
+      cowMoo(); thump(1); break;
+  }
+  crowdHype = Math.max(crowdHype, 0.5);
+  if(c.isPlayer){ rumble(160, 0.9, 0.6); announce(c.veh.specialName + '!', 1.4); }
+}
+
+// ---- Maw's Wildcard: periodic announced match modifiers ----
+function setBallScale(s){ BALL_R = BALL_R0 * s; if(ballMesh) ballMesh.scale.setScalar(s); }
+function clearWild(){ gravCarMul = gravBallMul = gripMul = topMul = 1; boostFree = false; setBallScale(1); }
+// ball-floating cards stay SCORABLE (measured: too-floaty ones killed scoring); wildcards are
+// spicy occasional events, not the default state — ~13s each, 32-52s apart (~20% of play time).
+const WILDCARDS = [
+  { name:"GRAVY TIME — LOW GRAVITY, BOYS!",           dur:13, go(){ gravCarMul=0.55; gravBallMul=0.52; } },
+  { name:"GREASED LIGHTNIN' — HANG ONTO SOMETHIN'!",  dur:13, go(){ gripMul=0.28; topMul=1.28; } },
+  { name:"HAWG WILD — BOOST FOR EVERYBODY!",          dur:14, go(){ boostFree=true; } },
+  { name:"HAWG BALL — LOOK AT THE SIZE OF THAT THING!",dur:15, go(){ setBallScale(1.6); gravBallMul=0.85; } },
+];
+function tickWildcard(dt){
+  if(game.state !== 'play') return;
+  if(game.wildT > 0){
+    game.wildT -= dt;
+    if(game.wildT <= 0){ clearWild(); game.wild = null; announce("...alright, back to reg'lar rasslin'.", 2.4); }
+  } else {
+    game.wildCd -= dt;
+    if(game.wildCd <= 0 && game.timeLeft > 20){
+      const w = pick(WILDCARDS);
+      clearWild(); w.go(); game.wild = w; game.wildT = w.dur;
+      game.wildCd = 32 + Math.random()*20;
+      announce("🎲 MAW'S WILDCARD: " + w.name, 3.6);
+      crowdHype = Math.max(crowdHype, 0.85); crowdCheer(1.6); playSample('sfx:vuvu', 0.4);
+    }
+  }
+}
+
+// ---- Moonshine Jug: a power-up that grants a burst of unlimited shine ----
+let moonJug = null, moonJugT = 12;
+function buildMoonJug(){
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(1.5,1.7,3.4,12),
+    new THREE.MeshLambertMaterial({ color:0xcfe0c0, emissive:0x2a4a10, transparent:true, opacity:0.92 }));
+  body.position.y = 2.0; g.add(body);
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.8,1.1,10), new THREE.MeshLambertMaterial({ color:0xbcd0a8 }));
+  neck.position.y = 4.1; g.add(neck);
+  const xxx = new THREE.Mesh(new THREE.BoxGeometry(2.2,1.2,0.05), new THREE.MeshBasicMaterial({ color:0x3a2a12 }));
+  xxx.position.set(0,2.0,1.72); g.add(xxx);
+  const glow = new THREE.Mesh(new THREE.SphereGeometry(2.6,10,8),
+    new THREE.MeshBasicMaterial({ color:0xa8ff70, transparent:true, opacity:0.16, blending:THREE.AdditiveBlending, depthWrite:false }));
+  glow.position.y = 2.2; g.add(glow);
+  g.userData.glow = glow;
+  return g;
+}
+function spawnMoonJug(){
+  if(!moonJug){ moonJug = buildMoonJug(); scene.add(moonJug); }
+  const spots = [[0,0],[0,26],[0,-26]];
+  const s = pick(spots);
+  moonJug.position.set(s[0], 0, s[1]);
+  moonJug.visible = true; moonJug.userData.active = true;
+}
+function tickMoonJug(dt){
+  if(game.state !== 'play'){ if(moonJug) moonJug.visible = false; return; }
+  if(!moonJug || !moonJug.userData.active){
+    moonJugT -= dt;
+    if(moonJugT <= 0){ moonJugT = 22 + Math.random()*12; spawnMoonJug(); }
+    return;
+  }
+  moonJug.rotation.y += dt*1.4;
+  moonJug.position.y = Math.sin(performance.now()/500)*0.4;
+  const gl = moonJug.userData.glow; if(gl) gl.material.opacity = 0.12 + Math.abs(Math.sin(performance.now()/400))*0.14;
+  for(const c of cars){
+    if(c.dead > 0) continue;
+    const dx = c.pos.x - moonJug.position.x, dz = c.pos.z - moonJug.position.z;
+    if(dx*dx + dz*dz < 25){
+      c.shineT = 6; c.boost = 100;
+      moonJug.userData.active = false; moonJug.visible = false;
+      moonJugT = 20 + Math.random()*12;
+      burst(moonJug.position.clone().setY(2.5), 0xa8ff70, 34, 18);
+      crowdHype = Math.max(crowdHype, 0.7);
+      if(c.isPlayer){ rumble(300,1,0.7); announce("SHINE RUN! FULL SEND!", 2.2); crowdCheer(1.4); }
+      else chatMsg(c.name, c.team, "got the shine — LOOK OUT!");
+      break;
+    }
+  }
+}
+
 // ---------------- GAME STATE ----------------
 const game = {
   state:'lobby',      // lobby | countdown | play | goal | end
+  wild:null, wildT:0, wildCd:24,
   timeLeft:300, score:[0,0], overtime:false,
   countdownT:0, goalT:0, player:null, paused:false,
   chatCd: 8,
@@ -6903,6 +7098,7 @@ const HUD = {
   sb: document.getElementById('score-blue'), sr: document.getElementById('score-red'),
   clock: document.getElementById('clock'),
   boostNum: document.getElementById('boost-num'), boostRing: document.getElementById('boost-ring'),
+  specialInd: document.getElementById('special-ind'), specialName: document.getElementById('special-name'),
   speedo: document.getElementById('speedo'),
   ann: document.getElementById('announcer'), cd: document.getElementById('countdown'),
   chat: document.getElementById('chat'),
@@ -7025,6 +7221,7 @@ addEventListener('keydown', e=>{
   if(e.code==='KeyV'){ voiceOn = !voiceOn; announce(voiceOn ? 'ANNOUNCER: ON' : 'ANNOUNCER: FIRED', 1.6, false); try{ if(!voiceOn && window.speechSynthesis) speechSynthesis.cancel(); }catch(err){} }
   if(e.code==='Escape' && (game.state==='play'||game.state==='countdown')) togglePause();
   if(e.code==='Space' && game.player && (game.state==='play'||game.state==='countdown')) tryJump(game.player);
+  if((e.code==='KeyE'||e.code==='KeyF') && game.player && !game.paused) useSpecial(game.player);   // signature move
 });
 addEventListener('keyup', e=>{ keys[e.code]=false; });
 let ballCam = true;
@@ -7035,7 +7232,7 @@ let padState = null, padButtonsPrev = [], padStickPrev = { x:0, y:0 };
 // ---------------- TOUCH CONTROLS (phones/tablets) ----------------
 // Left thumb: virtual stick (up=gas, down=reverse, sideways=steer). Right thumb: JUMP/BOOST/CAM.
 // State merges into player input exactly like the gamepad does; on non-touch devices the UI never shows.
-const TOUCH = { on:false, steer:0, throttle:0, boost:false, jumpEdge:false, camEdge:false, pauseEdge:false };
+const TOUCH = { on:false, steer:0, throttle:0, boost:false, jumpEdge:false, camEdge:false, pauseEdge:false, specialEdge:false };
 (function initTouch(){
   if(typeof document === 'undefined' || typeof document.body === 'undefined') return;
   // visibility is gated on touch capability; the handlers are wired unconditionally so
@@ -7080,6 +7277,7 @@ const TOUCH = { on:false, steer:0, throttle:0, boost:false, jumpEdge:false, camE
   }
   btn('tb-jump',  () => { TOUCH.jumpEdge = true; });
   btn('tb-boost', () => { TOUCH.boost = true; }, () => { TOUCH.boost = false; });
+  btn('tb-special', () => { TOUCH.specialEdge = true; });
   btn('tb-cam',   () => { TOUCH.camEdge = true; });
   btn('tb-pause', () => { TOUCH.pauseEdge = true; });
 })();
@@ -7118,6 +7316,7 @@ function pollPad(){
     boost: pressed(1) || pressed(5),                                // ◯ or R1
     jumpEdge: edge(0),                                              // ✕
     camEdge: edge(3),                                               // △
+    specialEdge: edge(2),                                           // ▢ — signature move
     pauseEdge: edge(9),                                             // OPTIONS
   };
   // menu-nav edges: D-pad (12-15) or left stick flicks
@@ -7182,18 +7381,28 @@ function updateCar(c, dt, input){
   }
   const v = c.veh;
   const f = carForward(c);
+  // tick per-car gameplay timers (specials, spin, shine, demo streak)
+  if(c.specialCd > 0) c.specialCd -= dt;
+  if(c.spinT > 0) c.spinT -= dt;
+  if(c.shineT > 0){ c.shineT -= dt; if(c.shineT > 0 && Math.random()<0.6)
+    spawnGlow(c.pos.x+(Math.random()-0.5)*3, 1+Math.random()*2, c.pos.z+(Math.random()-0.5)*3, 0, 6, 0, 0xa8ff70, 0.35, 0.9, -3); }
+  if(c.demoStreakT > 0){ c.demoStreakT -= dt; if(c.demoStreakT <= 0) c.demoStreak = 0; }
+  // shine + "hawg wild" wildcard = free unlimited boost; else drain the tank
+  const shine = c.shineT > 0;
+  const freeB = shine || boostFree;
+  const canBoost = input.boost && (c.boost > 0 || freeB);
+  const topM = SURF.top * topMul * (shine ? 1.25 : 1);
 
   if(c.onGround){
     // throttle
     let throttle = input.throttle;
     const fwdSpeed = c.vel.dot(f);
-    let max = v.top * SURF.top;
-    if(input.boost && c.boost>0){ max = v.top * SURF.top + 16; }
+    let max = v.top * topM + (canBoost ? 16 : 0);
     c.vel.x += f.x * v.accel * SURF.accel * throttle * dt;
     c.vel.z += f.z * v.accel * SURF.accel * throttle * dt;
-    if(input.boost && c.boost>0){
+    if(canBoost){
       c.vel.x += f.x*30*dt; c.vel.z += f.z*30*dt;
-      c.boost = Math.max(0, c.boost - 28*dt);
+      if(!freeB) c.boost = Math.max(0, c.boost - 28*dt);
     }
     // steering (need speed)
     const spd = Math.hypot(c.vel.x, c.vel.z);
@@ -7203,21 +7412,23 @@ function updateCar(c, dt, input){
     const nf = carForward(c);
     const fwdComp = c.vel.dot(nf);
     const latV = c.vel.clone().sub(nf.clone().multiplyScalar(fwdComp));
-    // ice barely bites (drift city); bog mud grabs hard
-    c.vel.sub(latV.multiplyScalar(Math.min(1, 9*SURF.grip*dt)));
+    // ice barely bites (drift city); bog mud grabs hard; wildcards can grease the whole floor
+    c.vel.sub(latV.multiplyScalar(Math.min(1, 9*SURF.grip*gripMul*dt)));
     // rolling drag + no-throttle brake (a lifted throttle barely slows ya on ice)
-    const drag = (throttle===0 ? 1.8 : 0.35) * (SURF.grip < 1 ? SURF.grip*2 : 1);
+    const eGrip = SURF.grip * gripMul;
+    const drag = (throttle===0 ? 1.8 : 0.35) * (eGrip < 1 ? eGrip*2 : 1);
     c.vel.x -= c.vel.x*drag*dt; c.vel.z -= c.vel.z*drag*dt;
     // clamp
     const s2 = Math.hypot(c.vel.x,c.vel.z);
     if(s2>max){ c.vel.x *= max/s2; c.vel.z *= max/s2; }
   } else {
-    // air: gravity, slight air steer, boost
-    c.vel.y += GRAV_CAR*dt;
+    // air: gravity, slight air steer, and boost that LIFTS ya (aerials!) as well as pushes
+    c.vel.y += GRAV_CAR * gravCarMul * dt;
     c.yaw += input.steer * 1.6 * dt;
-    if(input.boost && c.boost>0){
-      c.vel.x += f.x*26*dt; c.vel.z += f.z*26*dt;
-      c.boost = Math.max(0, c.boost - 28*dt);
+    if(canBoost){
+      c.vel.x += f.x*17*dt; c.vel.z += f.z*17*dt;
+      c.vel.y += 45*dt;                                   // beats gravity (34) so holding boost CLIMBS — aerials!
+      if(!freeB) c.boost = Math.max(0, c.boost - 28*dt);
     }
   }
 
@@ -7325,7 +7536,9 @@ function updateCar(c, dt, input){
 
   // visual
   c.mesh.position.copy(c.pos);
-  c.mesh.rotation.set(0, c.yaw, 0);
+  // Blade Spin whirls the whole rig; otherwise face travel direction
+  if(c.spinT > 0){ c.mesh.rotation.set(0, c.yaw + (0.6 - c.spinT)/0.6 * Math.PI*4, 0); }
+  else c.mesh.rotation.set(0, c.yaw, 0);
   // body roll into corners, scaled by speed — reads like soft turf tires loading up
   const rollT = c.onGround ? c.steerVis * Math.min(1, Math.hypot(c.vel.x,c.vel.z)/40) * 0.07 : 0;
   c.rollVis += (rollT - c.rollVis) * Math.min(1, 10*dt);
@@ -7344,7 +7557,7 @@ function updateCar(c, dt, input){
 }
 
 function updateBall(dt){
-  ball.vel.y += GRAV_BALL*dt;
+  ball.vel.y += GRAV_BALL * gravBallMul * dt;
   // drag (bog air is thick with skeeters; pond air is thin and slick)
   ball.vel.multiplyScalar(1 - SURF.ballDrag*dt);
   ball.pos.addScaledVector(ball.vel, dt);
@@ -7469,9 +7682,20 @@ function carBallCollide(c, dt){
   }
 }
 
+const STREAK_CALL = { 2:"DOUBLE TROUBLE!", 3:"HOG WILD!", 4:"PLUMB UNSTOPPABLE!", 5:"CALL THE LAW!" };
 function demolish(victim, culprit){
   victim.dead = 3;
   culprit.demos++;
+  // reward: refill the tank + build a rampage streak (RL-style aggressive-play loop)
+  culprit.boost = 100;
+  culprit.demoStreak = (culprit.demoStreak || 0) + 1;
+  culprit.demoStreakT = 9;
+  victim.demoStreak = 0;
+  const call = STREAK_CALL[Math.min(5, culprit.demoStreak)];
+  if(call && culprit.demoStreak >= 2){
+    if(culprit.isPlayer) announce(call, 2.0);
+    else chatMsg(culprit.name, culprit.team, call.toLowerCase());
+  }
   victim.mesh.visible = false; victim.tag.visible = false;
   burst(new THREE.Vector3(victim.pos.x, victim.pos.y+2, victim.pos.z), 0xff5522, 45, 22);
   hitstop = Math.max(hitstop, 0.08);          // let the wreck land
@@ -7596,6 +7820,11 @@ function botInput(c, dt){
     } else if(bd < 8 && ball.pos.y <= 5 && aligned && Math.random()<0.35){
       botJump(c, true); c.aiJumpCd = 2.0; // flip into ball
     }
+  }
+  // signature move: fire it when attacking and close to the ball
+  if(c.aiSpecialCd > 0) c.aiSpecialCd -= dt;
+  else if(attacking && c.pos.distanceTo(ball.pos) < 13 && c.specialCd <= 0 && Math.random() < 0.03){
+    useSpecial(c); c.aiSpecialCd = 7 + Math.random()*7;
   }
   return input;
 }
@@ -7753,6 +7982,10 @@ function startMatch(rematch){
     }
   }
   game.score=[0,0]; game.overtime=false; game.timeLeft = lobby.len;
+  // reset gameplay-variety state for the fresh match
+  game.wild = null; game.wildT = 0; game.wildCd = 22 + Math.random()*14;
+  clearWild();
+  moonJugT = 14; if(moonJug){ moonJug.visible = false; moonJug.userData.active = false; }
   HUD.sb.textContent='0'; HUD.sr.textContent='0';
   HUD.chat.innerHTML='';
   for(const p of pads){ p.timer=0; p.mesh.visible=true; }
@@ -7887,13 +8120,15 @@ function animate(){
       if(pad.pauseEdge && (game.state==='play'||game.state==='countdown')) togglePause();
       if(pad.camEdge) ballCam = !ballCam;
       if(pad.jumpEdge && game.player && !game.paused && (game.state==='play'||game.state==='countdown')) tryJump(game.player);
+      if(pad.specialEdge && game.player && !game.paused) useSpecial(game.player);
     }
   }
   if(TOUCH.on){
     if(TOUCH.pauseEdge && (game.state==='play'||game.state==='countdown')) togglePause();
     if(TOUCH.camEdge) ballCam = !ballCam;
     if(TOUCH.jumpEdge && game.player && !game.paused && (game.state==='play'||game.state==='countdown')) tryJump(game.player);
-    TOUCH.pauseEdge = TOUCH.camEdge = TOUCH.jumpEdge = false;
+    if(TOUCH.specialEdge && game.player && !game.paused) useSpecial(game.player);
+    TOUCH.pauseEdge = TOUCH.camEdge = TOUCH.jumpEdge = TOUCH.specialEdge = false;
   }
 
   if(game.state!=='play') fxSpeedEl.style.opacity = 0;   // streaks are a full-speed-only thing
@@ -7969,6 +8204,8 @@ function animate(){
       updateBall(dt);
       for(const c of cars) carBallCollide(c, dt);
       for(let i=0;i<cars.length;i++) for(let j=i+1;j<cars.length;j++) carCarCollide(cars[i],cars[j]);
+      tickWildcard(dt);
+      tickMoonJug(dt);
     }
 
     // clock
@@ -8001,11 +8238,17 @@ function animate(){
     HUD.boostRing.style.setProperty('--b', (bo*3.6)+'deg');
     const pSpeed = Math.hypot(p.vel.x,p.vel.z);
     const mph = Math.round(pSpeed * 2.1);
-    HUD.speedo.textContent = mph + ' mph' + (pSpeed>SUPERSONIC ? '  🔥 SUPERSONIC' : '');
+    HUD.speedo.textContent = mph + ' mph' + (p.shineT>0 ? '  ☀️ SHINE' : (pSpeed>SUPERSONIC ? '  🔥 SUPERSONIC' : ''));
     updateEngine(pSpeed, pin.boost);
     // speed streaks bloom in as ya close on supersonic
     const sfx = THREE.MathUtils.clamp((pSpeed - 42) / 24, 0, 1);
     fxSpeedEl.style.opacity = (sfx*sfx*0.34).toFixed(3);
+    // signature-move indicator: name + ready glow / cooldown fraction
+    if(HUD.specialInd){
+      const ready = p.specialCd <= 0;
+      HUD.specialName.textContent = ready ? p.veh.specialName : Math.ceil(p.specialCd)+'s';
+      HUD.specialInd.classList.toggle('ready', ready);
+    }
   }
 
   updateParticles(dt);

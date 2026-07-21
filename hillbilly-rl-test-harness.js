@@ -42,6 +42,7 @@ global.clearInterval = ()=>{};
 class V3 {
   constructor(x=0,y=0,z=0){ this.x=x;this.y=y;this.z=z; }
   set(x,y,z){this.x=x;this.y=y;this.z=z;return this;}
+  setX(x){this.x=x;return this;} setY(y){this.y=y;return this;} setZ(z){this.z=z;return this;}
   copy(v){this.x=v.x;this.y=v.y;this.z=v.z;return this;}
   clone(){return new V3(this.x,this.y,this.z);}
   add(v){this.x+=v.x;this.y+=v.y;this.z+=v.z;return this;}
@@ -171,7 +172,7 @@ for(let i=0;i<120;i++) frame();
 console.log('goal camera test — camPos:', camPos.x.toFixed(1), camPos.y.toFixed(1), camPos.z.toFixed(1));
 if(camPos.x < 82) throw new Error('camera did not follow the car into the goal');
 if(camPos.x > 82+26-2.4) throw new Error('camera punched out the back of the goal');
-if(Math.abs(camPos.z) > 15-1.4 || camPos.y > 12-1.4) throw new Error('camera clipped out of the goal recess');
+if(Math.abs(camPos.z) > 18-1.4 || camPos.y > 13-1.4) throw new Error('camera clipped out of the goal recess');
 
 // arena test: each venue swaps surface physics but a clean shot still scores and stays in bounds
 // (arena 3 = Mallard Marsh also exercises the duck flights + shotgun path headlessly)
