@@ -44,6 +44,11 @@ MA-rated redneck-comedy Rocket League clone, solo vs bots. One self-contained Th
   gravCarMul/gravBallMul/gripMul/topMul/boostFree/BALL_R), the MOONSHINE JUG pickup, demolition
   boost+streak rewards, and boost-assisted AERIALS. Goal mouth is goalHalfW 18 / goalH 13 (harness
   recess asserts track these). Ball-floating wildcards MUST stay scorable — don't over-float them.
+- Gameplay-variety II (iter 37) — keep all five: trick-shot goal values (goalValue(): howitzer /
+  air mail / signature finish = 2pts, LAST CALL doubles), ball CURVE (applyHitSpin + applyMagnus),
+  bot PERSONAS (PERSONAS[], see botInput), LAST CALL final-30s, and RALLY FIRE (rolling touch
+  window — a decaying heat pool was tried and NEVER ignited in real play; don't revert to it).
+  Goals are no longer always worth 1 — harness asserts must check the score increased.
 
 ## Workflow (surgical)
 

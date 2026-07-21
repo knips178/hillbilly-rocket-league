@@ -137,7 +137,8 @@ const preA = game.score[0];   // bots can sneak an organic goal in before this �
 ball.pos.set(70, 5, 0); ball.vel.set(85, 0, 0);
 runFrames(30);
 console.log('TEST A — score after shot:', game.score, 'state:', game.state);
-if(game.score[0] !== preA + 1) throw new Error('direct shot did not score (pre='+preA+')');
+// goals are worth 1, or 2 for a trick shot (howitzer/air-mail/special), doubled in LAST CALL
+if(game.score[0] <= preA) throw new Error('direct shot did not score (pre='+preA+')');
 runFrames(60*5);
 console.log('state after goal reset:', game.state);
 
@@ -185,7 +186,7 @@ for(const ai of [1, 2, 3]){
   ball.pos.set(70, 5, 0); ball.vel.set(85, 0, 0);
   runFrames(45);
   console.log('arena', ai, 'shot test — score:', game.score, 'state:', game.state);
-  if(game.score[0] !== preS + 1) throw new Error('arena '+ai+' shot did not score (pre='+preS+')');
+  if(game.score[0] <= preS) throw new Error('arena '+ai+' shot did not score (pre='+preS+')');
   runFrames(60*3);
   if(Math.abs(ball.pos.x) > 100 || Math.abs(ball.pos.z) > 60) throw new Error('arena '+ai+': ball escaped');
 }

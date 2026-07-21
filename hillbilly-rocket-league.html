@@ -1,6 +1,24 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-19 iter 37 — GAMEPLAY VARIETY II: 5 more systems, per user goal (round 2)]
+1. TRICK-SHOT SCORING: goals are worth 1, or 2 for a HOWITZER (struck >55u out), AIR MAIL (struck
+   while airborne), or a SIGNATURE FINISH (special-move goal) — announced with the callout.
+   Bookkeeping rides on the ball (shotFromX/shotAir/shotSpecial), set on every real touch.
+2. BALL CURVE (Magnus): an off-centre whack imparts spin (axis = contact normal x the car's
+   tangential motion) and spin bends the flight. Measured: straight-on ~1u, glancing ~2u, heavy
+   slice ~4-5u of bend. Tuned up twice — the first values were imperceptible.
+3. BOT PERSONALITIES: every hick is a BRUISER (hunts demos), SNIPER (long-range shots), KEEPER
+   (sits deep) or WILDCARD (erratic + trigger-happy). Measured avg distance from own goal:
+   KEEPER 23 / SNIPER 31 / WILDCARD 54 / BRUISER 106 — they demonstrably play different.
+   Shown as a STYLE column on the results card.
+4. LAST CALL: the final 30 seconds pay DOUBLE, announced, with a red pulsing clock.
+5. RALLY FIRE: 4 touches inside 5s sets the feed sack alight — flames, and it hits 22% harder
+   while lit. REWRITE NOTE: the first design (decaying heat pool) could never accumulate against
+   real touch cadence (measured 0 ignitions in 3 min); the rolling-touch-window version ignites
+   ~4x per 3 min (~13% of play). Don't go back to the pool.
+Harness: goal asserts now check the score INCREASED (goals aren't always worth 1 any more).
+Measured 4.3ms/frame with all of iter 36 + 37 live.
 [2026-07-19 iter 36 — GAMEPLAY VARIETY: 5 systems for fun, per user goal]
 Five on-theme systems, each dialed in-browser for feel (not guessed):
 1. SIGNATURE VEHICLE MOVES (E/F key · ▢ pad · touch ⚡): every ride plays distinctly now.
@@ -469,6 +487,8 @@ STILL TO DO (ideas for future iterations):
   .score-red  { background:linear-gradient(180deg,#b8422b,#5e1410); border-radius:0 10px 10px 0; }
   #clock { background:rgba(21,16,8,0.86); color:#ffd98a; padding:8px 18px; font-size:26px; display:flex; align-items:center;
     backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); }
+  #clock.lastcall { color:#fff; background:rgba(150,20,20,0.9); animation:lastCallPulse 1s ease-in-out infinite; }
+  @keyframes lastCallPulse { 0%,100%{ box-shadow:0 0 0 rgba(255,60,60,0); } 50%{ box-shadow:0 0 22px rgba(255,80,80,.9); } }
   .tname { font-size:10px; letter-spacing:1px; opacity:.85; display:block; text-transform:uppercase; }
   #boost-wrap { position:absolute; right:28px; bottom:26px; text-align:center; }
   #boost-ring {
@@ -6256,7 +6276,9 @@ scene.add(landRing);
   ballMesh.add(band);
   const band2 = band.clone(); band2.rotation.z = Math.PI/2; ballMesh.add(band2);
 }
-const ball = { pos:new THREE.Vector3(0,BALL_R,0), vel:new THREE.Vector3(), spin:new THREE.Vector3() };
+const ball = { pos:new THREE.Vector3(0,BALL_R,0), vel:new THREE.Vector3(), spin:new THREE.Vector3(),
+  heat:0, onFire:false,                       // rally heat — the sack catches fire on long rallies
+  shotFromX:0, shotAir:false, shotSpecial:false };   // trick-shot bookkeeping for bonus points
 
 // ---------------- BOOST PADS ----------------
 const pads = [];
@@ -6907,6 +6929,7 @@ function makeCar(name, team, vehIdx, isPlayer){
     onGround:true, jumps:2, boost:33, flip:0, flipDir:0, pitchVis:0, rollVis:0, steerVis:0,
     aiTimer:Math.random()*2, aiJumpCd:0, demoted:0, goals:0, touches:0, demos:0,
     specialCd:0, spinT:0, shineT:0, demoStreak:0, demoStreakT:0, aiSpecialCd:2+Math.random()*3,
+    persona: isPlayer ? null : PERSONAS[Math.floor(Math.random()*PERSONAS.length)],
   };
   cars.push(car);
   return car;
@@ -6968,6 +6991,8 @@ function ballKick(c, radius, power, up){
   dir.normalize();
   ball.vel.set(dir.x*power, Math.max(ball.vel.y, up), dir.z*power);
   ball.lastTouch = c; c.touches++;
+  bumpHeat();
+  ball.shotFromX = c.pos.x; ball.shotAir = !c.onGround; ball.shotSpecial = true;   // signature finish
   spawnGlow(ball.pos.x, ball.pos.y, ball.pos.z, dir.x*10, 6, dir.z*10, 0xfff2c0, 0.4, 1.4, -6);
   return true;
 }
@@ -7084,10 +7109,106 @@ function tickMoonJug(dt){
   }
 }
 
+// ================= GAMEPLAY VARIETY II (iter 37) =================
+// Trick-shot bonus points, ball curve (Magnus), rally heat, LAST CALL, and bot personalities.
+
+// ---- ball curve: an off-centre whack imparts spin, and spin bends the flight ----
+// tuned in-browser: a glancing whack should visibly bend the flight (~5u over a 1s shot),
+// without turning every shot into a banana. Weaker values were imperceptible.
+const SPIN_K = 0.12, SPIN_MAX = 6, MAGNUS_K = 0.065;
+function applyHitSpin(c, n){
+  // only the part of the car's motion ACROSS the contact normal rolls the sack
+  const cv = c.vel, vn = cv.dot(n);
+  const tx = cv.x - n.x*vn, ty = cv.y - n.y*vn, tz = cv.z - n.z*vn;
+  // spin axis = n x tangential
+  let sx = n.y*tz - n.z*ty, sy = n.z*tx - n.x*tz, sz = n.x*ty - n.y*tx;
+  sx *= SPIN_K; sy *= SPIN_K; sz *= SPIN_K;
+  const m = Math.hypot(sx, sy, sz);
+  if(m > SPIN_MAX){ const k = SPIN_MAX/m; sx*=k; sy*=k; sz*=k; }
+  ball.spin.set(sx, sy, sz);
+}
+function applyMagnus(dt){
+  const s = ball.spin, v = ball.vel;
+  if(s.x===0 && s.y===0 && s.z===0) return;
+  const k = MAGNUS_K * dt;
+  const ax = s.y*v.z - s.z*v.y, ay = s.z*v.x - s.x*v.z, az = s.x*v.y - s.y*v.x;
+  v.x += ax*k; v.y += ay*k; v.z += az*k;
+  s.multiplyScalar(Math.max(0, 1 - 0.55*dt));       // spin bleeds off
+  if(s.lengthSq() < 0.01) s.set(0,0,0);
+}
+
+// ---- rally heat: a fast scramble sets the feed sack alight ----
+// Rolling window, NOT a decaying pool — the pool version could never accumulate against real
+// touch cadence (measured: 0 ignitions in 3 minutes, heat peaked 3.1 of 6). This is predictable:
+// N touches inside a few seconds lights her, and further whacks keep her stoked.
+const HEAT_WINDOW = 5, HEAT_TOUCHES = 4, FIRE_TIME = 6;
+function bumpHeat(){
+  const t = performance.now()/1000;
+  if(!ball.touchT) ball.touchT = [];
+  ball.touchT.push(t);
+  while(ball.touchT.length && t - ball.touchT[0] > HEAT_WINDOW) ball.touchT.shift();
+  ball.heat = ball.touchT.length;
+  if(ball.onFire){ ball.fireT = Math.max(ball.fireT || 0, 4); return; }   // keep her stoked
+  if(ball.heat >= HEAT_TOUCHES){
+    ball.onFire = true; ball.fireT = FIRE_TIME;
+    announce("🔥 THAT SACK'S ON FIRE!", 2.4);
+    crowdHype = Math.max(crowdHype, 0.9); crowdCheer(1.4);
+  }
+}
+function coolBall(dt){
+  if(ball.touchT && ball.touchT.length){
+    const t = performance.now()/1000;
+    while(ball.touchT.length && t - ball.touchT[0] > HEAT_WINDOW) ball.touchT.shift();
+    ball.heat = ball.touchT.length;
+  }
+  if(ball.onFire){
+    ball.fireT -= dt;
+    if(ball.fireT <= 0){ ball.onFire = false; ball.heat = 0; ball.touchT = []; }
+  }
+  if(ball.onFire && game.state === 'play'){
+    for(let i=0;i<2;i++) spawnGlow(
+      ball.pos.x+(Math.random()-0.5)*BALL_R, ball.pos.y+(Math.random()-0.5)*BALL_R, ball.pos.z+(Math.random()-0.5)*BALL_R,
+      (Math.random()-0.5)*4, 5+Math.random()*5, (Math.random()-0.5)*4,
+      Math.random()<0.5 ? 0xff8a1e : 0xffd23e, 0.35, 1.5, -3);
+  }
+}
+
+// ---- LAST CALL: the final 30 seconds pay double ----
+function tickLastCall(){
+  if(game.state!=='play' || game.overtime || game.lastCall) return;
+  if(game.timeLeft > 0 && game.timeLeft <= 30){
+    game.lastCall = true;
+    announce("🍺 LAST CALL — GOALS COUNT DOUBLE!", 3.4);
+    crowdHype = Math.max(crowdHype, 1); crowdCheer(2.0); playSample('sfx:vuvu', 0.5);
+    if(HUD.clock) HUD.clock.classList.add('lastcall');
+  }
+}
+
+// ---- trick shots: how a goal was scored decides what it's worth ----
+// base 1 · +1 for a howitzer / air mail / special-move finish · doubled during LAST CALL
+function goalValue(team){
+  let pts = 1, tag = null;
+  const goalX = team===0 ? ARENA.halfX : -ARENA.halfX;
+  const range = Math.abs(goalX - ball.shotFromX);
+  if(ball.shotSpecial){ pts = 2; tag = "SIGNATURE FINISH!"; }
+  else if(ball.shotAir){ pts = 2; tag = "AIR MAIL — SPECIAL DELIVERY!"; }
+  else if(range > 55){  pts = 2; tag = "HOWITZER FROM DOWNTOWN!"; }
+  if(game.lastCall){ pts *= 2; tag = (tag ? tag+' ' : '') + "(LAST CALL — DOUBLE!)"; }
+  return { pts, tag };
+}
+
+// ---- bot personalities: every hick plays their own brand of stupid ----
+const PERSONAS = [
+  { key:'bruiser',  label:'BRUISER',  hunt:true,  defend:0.0, shootRange:16, specialOdds:0.035, boostBias:1.2 },
+  { key:'sniper',   label:'SNIPER',   hunt:false, defend:0.1, shootRange:30, specialOdds:0.030, boostBias:1.0 },
+  { key:'keeper',   label:'KEEPER',   hunt:false, defend:0.6, shootRange:13, specialOdds:0.020, boostBias:0.8 },
+  { key:'wildcard', label:'WILDCARD', hunt:false, defend:0.0, shootRange:20, specialOdds:0.055, boostBias:1.3, jitter:12 },
+];
+
 // ---------------- GAME STATE ----------------
 const game = {
   state:'lobby',      // lobby | countdown | play | goal | end
-  wild:null, wildT:0, wildCd:24,
+  wild:null, wildT:0, wildCd:24, lastCall:false,
   timeLeft:300, score:[0,0], overtime:false,
   countdownT:0, goalT:0, player:null, paused:false,
   chatCd: 8,
@@ -7558,6 +7679,8 @@ function updateCar(c, dt, input){
 
 function updateBall(dt){
   ball.vel.y += GRAV_BALL * gravBallMul * dt;
+  applyMagnus(dt);                                  // spin bends the shot in flight
+  coolBall(dt);                                     // rally heat decays; flames while lit
   // drag (bog air is thick with skeeters; pond air is thin and slick)
   ball.vel.multiplyScalar(1 - SURF.ballDrag*dt);
   ball.pos.addScaledVector(ball.vel, dt);
@@ -7632,13 +7755,19 @@ function carBallCollide(c, dt){
     // impulse
     const rel = c.vel.clone().sub(ball.vel);
     const impact = Math.max(0, rel.dot(n));
-    const pow = c.veh.power * (c.flip>0 ? 1.5 : 1);
+    // a lit sack hits harder — rallies escalate
+    const pow = c.veh.power * (c.flip>0 ? 1.5 : 1) * (ball.onFire ? 1.22 : 1);
     ball.vel.addScaledVector(n, impact*1.35*pow + 6*pow);
     ball.vel.y += 3.5*pow;  // pop-up bias
     ball.vel.addScaledVector(c.vel, 0.35);
     // car recoil
     c.vel.addScaledVector(n, -impact*0.25);
-    if(impact>3){ ball.lastTouch = c; c.touches++; }
+    if(impact>3){
+      ball.lastTouch = c; c.touches++;
+      applyHitSpin(c, n);                                  // off-centre whacks bend the flight
+      bumpHeat();
+      ball.shotFromX = c.pos.x; ball.shotAir = !c.onGround; ball.shotSpecial = false;
+    }
     // contact feedback — burlap flecks n' amber sparks off the strike point, whack scaled to the hit
     if(impact > 6){
       const cx = ball.pos.x - n.x*BALL_R, cy = ball.pos.y - n.y*BALL_R, cz = ball.pos.z - n.z*BALL_R;
@@ -7766,10 +7895,22 @@ function botInput(c, dt){
     const dd = o.pos.distanceToSquared(ball.pos);
     if(dd<nd){ nd=dd; nearest=o; }
   }
-  const attacking = (nearest===c) || game.state==='countdown';
+  const P = c.persona || PERSONAS[1];
+  let attacking = (nearest===c) || game.state==='countdown';
+  // KEEPERs hang back unless the ball's in their kitchen; BRUISERs go huntin' for a demo
+  if(P.defend > 0.4 && game.state==='play' && Math.abs(ball.pos.x - ownGoalX) > 45) attacking = false;
+  let huntTarget = null;
+  if(P.hunt && !attacking && c.boost > 30){
+    let best=null, bd=1e9;
+    for(const o of cars){ if(o.team===c.team || o.dead>0) continue;
+      const dd = o.pos.distanceToSquared(c.pos); if(dd<bd){ bd=dd; best=o; } }
+    if(best && bd < 55*55) huntTarget = best;      // run 'em down instead of rotating
+  }
 
   let target;
-  if(attacking){
+  if(huntTarget){
+    target = huntTarget.pos.clone();
+  } else if(attacking){
     // aim point slightly behind ball relative to enemy goal
     const toGoal = new THREE.Vector3(enemyGoalX - ball.pos.x, 0, -ball.pos.z*0.5).normalize();
     target = ball.pos.clone().addScaledVector(toGoal, -6);
@@ -7794,6 +7935,8 @@ function botInput(c, dt){
     }
   }
 
+  // WILDCARDs never quite drive where they mean to
+  if(P.jitter){ target = target.clone(); target.x += (Math.random()-0.5)*P.jitter; target.z += (Math.random()-0.5)*P.jitter; }
   // steer toward target
   const to = target.clone().sub(c.pos); to.y=0;
   const dist = to.length();
@@ -7807,9 +7950,10 @@ function botInput(c, dt){
   // slide clean past everything and the pond turns into bumper bowling
   if(SURF.grip < 0.5 && Math.abs(diff) > 0.5) input.throttle *= 0.45;
 
-  // boost heuristics
+  // boost heuristics (personality biases how eager they are on the pedal)
   const aligned = Math.abs(diff) < 0.25;
-  if(aligned && c.boost>8 && (dist>30 || (attacking && dist<25 && Math.abs(ball.pos.x-enemyGoalX)<45))) input.boost = true;
+  const boostWant = (dist > 30/P.boostBias) || (attacking && dist<25 && Math.abs(ball.pos.x-enemyGoalX)<45) || !!huntTarget;
+  if(aligned && c.boost>8 && boostWant) input.boost = true;
 
   // jump at ball
   c.aiJumpCd -= dt;
@@ -7821,9 +7965,11 @@ function botInput(c, dt){
       botJump(c, true); c.aiJumpCd = 2.0; // flip into ball
     }
   }
-  // signature move: fire it when attacking and close to the ball
+  // signature move: personality decides the range and how trigger-happy they are
   if(c.aiSpecialCd > 0) c.aiSpecialCd -= dt;
-  else if(attacking && c.pos.distanceTo(ball.pos) < 13 && c.specialCd <= 0 && Math.random() < 0.03){
+  else if(c.specialCd <= 0 && Math.random() < P.specialOdds
+          && (huntTarget ? c.pos.distanceTo(huntTarget.pos) < 12
+                         : attacking && c.pos.distanceTo(ball.pos) < P.shootRange)){
     useSpecial(c); c.aiSpecialCd = 7 + Math.random()*7;
   }
   return input;
@@ -7869,9 +8015,12 @@ function resetKickoff(){
 }
 
 function scoreGoal(team){
-  game.score[team]++;
+  const gv = goalValue(team);                     // trick shots + LAST CALL are worth more
+  game.score[team] += gv.pts;
+  ball.heat = 0; ball.onFire = false; ball.fireT = 0; ball.touchT = []; ball.spin.set(0,0,0);
   HUD.sb.textContent = game.score[0]; HUD.sr.textContent = game.score[1];
   goalHorn(); playVox('goal'); rumble(600, 1, 1);                       // real "GOOOAL!" shout + horn
+  if(gv.pts > 1) setTimeout(()=>announce('+'+gv.pts+' — '+gv.tag, 3.0), 900);
   if(Math.random()<0.6) setTimeout(()=>playSample('sfx:vuvu', 0.5), 650); // stadium vuvuzela
   const playerTeam = game.player.team;
   // credit (or blame) the last toucher
@@ -7926,13 +8075,14 @@ function endMatch(){
   const rows = sorted.map(c=>{
     const col = c.team===0 ? '#6fb3ff' : '#ff8a6f';
     const tag = c===mvp ? '<span class="mvp-tag">🐷 TOP HOG</span>' : '';
+    const style = c.isPlayer ? '—' : (c.persona ? c.persona.label : '—');
     return `<tr${c===mvp?' class="mvp"':''}><td style="color:${col}">${c.name}${c.isPlayer?' (you)':''}${tag}</td>`+
-      `<td>${c.goals}</td><td>${c.demos}</td><td>${c.touches}</td></tr>`;
+      `<td style="color:#9c8358;font-size:11px">${style}</td><td>${c.goals}</td><td>${c.demos}</td><td>${c.touches}</td></tr>`;
   }).join('');
   document.getElementById('overlay-sub').innerHTML =
     endLine +
     `<br><br><b style="font-size:24px">Moonshiners ${game.score[0]} — ${game.score[1]} Roadkill</b>` +
-    `<div id="stats-card"><table><tr><th>Hand</th><th>Goals</th><th>Demos</th><th>Touches</th></tr>${rows}</table></div>`;
+    `<div id="stats-card"><table><tr><th>Hand</th><th>Style</th><th>Goals</th><th>Demos</th><th>Touches</th></tr>${rows}</table></div>`;
   playSample('sfx:whistle', 0.85);                 // full-time whistle
   setTimeout(()=>playVox(eb), 700);
   if(won){ banjoLick(); crowdCheer(2.5); } else sadTrombone();
@@ -7984,6 +8134,9 @@ function startMatch(rematch){
   game.score=[0,0]; game.overtime=false; game.timeLeft = lobby.len;
   // reset gameplay-variety state for the fresh match
   game.wild = null; game.wildT = 0; game.wildCd = 22 + Math.random()*14;
+  game.lastCall = false;
+  if(HUD.clock && HUD.clock.classList) HUD.clock.classList.remove('lastcall');
+  ball.heat = 0; ball.onFire = false; ball.fireT = 0; ball.touchT = []; ball.spin.set(0,0,0);
   clearWild();
   moonJugT = 14; if(moonJug){ moonJug.visible = false; moonJug.userData.active = false; }
   HUD.sb.textContent='0'; HUD.sr.textContent='0';
@@ -8211,6 +8364,7 @@ function animate(){
     // clock
     if(game.state==='play' && !game.overtime){
       game.timeLeft -= dt;
+      tickLastCall();
       if(game.timeLeft<=0){
         game.timeLeft = 0;
         if(game.score[0]===game.score[1]){
