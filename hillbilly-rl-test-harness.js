@@ -145,10 +145,16 @@ console.log('state after goal reset:', game.state);
 // demolition test
 for(let i=0;i<60*20 && game.state!=='play';i++) frame();
 const dbot = cars.find(c=>!c.isPlayer);
+// shove the ball well clear: after the previous goal it resets to the ORIGIN, which is exactly
+// where this test pins the victim — the player rammed the ball first, recoiled below supersonic,
+// and the demo silently failed (~8% of runs). This test is about car-vs-car, not the ball.
+ball.pos.set(0, 4.4, 40); ball.vel.set(0,0,0);
 dbot.pos.set(0,0,0); dbot.vel.set(0,0,0);
 game.player.dead=0; game.player.pos.set(-8,0,0); game.player.yaw=Math.PI/2; game.player.vel.set(58,0,0); game.player.boost=100;
 fakePad.buttons[7].value=1; fakePad.buttons[7].pressed=true; fakePad.buttons[1].pressed=true;
-for(let i=0;i<8;i++) frame();
+// PIN the victim: it's bot-driven, so its own AI (personas especially) can drive it clear of the
+// ram inside the 8-frame window — a pre-existing ~8% flake. Hold it still until contact lands.
+for(let i=0;i<30 && !(dbot.dead>0);i++){ dbot.pos.set(0,0,0); dbot.vel.set(0,0,0); frame(); }
 fakePad.buttons[7].value=0; fakePad.buttons[7].pressed=false; fakePad.buttons[1].pressed=false;
 console.log('demolition test — bot dead:', dbot.dead>0);
 if(!(dbot.dead>0)) throw new Error('demolition did not trigger');
@@ -168,8 +174,11 @@ if(Math.abs(camPos.z) > 52 && camPos.y < 8.5) throw new Error('camera behind the
 
 // camera follows the car into the goal recess (else it jams at the mouth in front of the car,
 // looking back out at the ball, with the car off the bottom of the screen)
+// PIN the car in the goal each frame: a bot can score during these 120 frames, and the kickoff
+// reset yanks the player back to midfield so the camera legitimately leaves the goal — another
+// pre-existing flake. Holding position keeps the test about the CAMERA, not about bot randomness.
 game.player.pos.set(88, 0, 0); ball.pos.set(0, 4.4, 0); ball.vel.set(0,0,0);
-for(let i=0;i<120;i++) frame();
+for(let i=0;i<120;i++){ game.player.pos.set(88, 0, 0); game.player.vel.set(0,0,0); frame(); }
 console.log('goal camera test — camPos:', camPos.x.toFixed(1), camPos.y.toFixed(1), camPos.z.toFixed(1));
 if(camPos.x < 82) throw new Error('camera did not follow the car into the goal');
 if(camPos.x > 82+26-2.4) throw new Error('camera punched out the back of the goal');

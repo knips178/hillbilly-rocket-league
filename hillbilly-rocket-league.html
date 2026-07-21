@@ -1,6 +1,28 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-20 iter 38 — ROADKILL: critters cross the pitch, get flattened, drop stew, per user request]
+- Arena-appropriate critters wander across the floor every ~11-22s (max 3 at once): barn gets
+  chicken/pig/goat, pond chicken/goat, bog pig/goat/chicken, marsh DUCK/chicken (reuses the
+  existing makeAnimal + buildDuck models). They waddle with a bob, face their travel direction
+  (box critters face +X at rot 0; the duck model at rot PI/2), and despawn off the far side.
+- Clobber one and it cartwheels: launched away from the car scaled to yer speed, tumbling on two
+  axes, bouncing, fading out after 2.6s — with a comedy yelp per species (synthesised pitch-bend
+  squawk/squeal/bleat/quack) plus a burst of feathers n' fur.
+- It leaves a ROADKILL STEW pot where it died (splat patch + pot + orange glow + steam), good for
+  26s. ARMING DELAY (1.3s): without it the rig that made the kill stood on the drop point and
+  swallowed it instantly — nobody ever saw the pot. Now it's a contested pickup.
+- Eating it grants BUMPER BEEF for 8s: ball hits x1.9 (measured 67 -> 116), you shrug off car
+  contact and launch whoever you hit (measured: even 20/20 trade becomes me 35 / them 42), and
+  yer demolition bar drops to 62% of supersonic. Greasy orange aura while it's runnin'.
+- Measured over 3 bot-minutes: 11 critters crossed, 3 got flattened, stew active 9% of play.
+  5.3ms/frame on the heaviest case (3v3 marsh + critters + pots + stew + fire + wildcard).
+- HARNESS DE-FLAKED (pre-existing, ~8% — proved by A/B against the iter-37 commit, NOT caused by
+  roadkill): the demolition test rammed the victim pinned at the ORIGIN, which is where the ball
+  resets to after the previous goal — the player hit the ball first, recoiled below supersonic,
+  and the demo silently failed. Ball is now parked clear. Also pinned the victim (its own AI could
+  drive clear) and the car in the goal-camera test (a bot scoring mid-test reset it to midfield).
+  0 failures in 40 consecutive runs, up from ~8%.
 [2026-07-19 iter 37 — GAMEPLAY VARIETY II: 5 more systems, per user goal (round 2)]
 1. TRICK-SHOT SCORING: goals are worth 1, or 2 for a HOWITZER (struck >55u out), AIR MAIL (struck
    while airborne), or a SIGNATURE FINISH (special-move goal) — announced with the callout.
@@ -6928,7 +6950,7 @@ function makeCar(name, team, vehIdx, isPlayer){
     pos:new THREE.Vector3(), vel:new THREE.Vector3(), yaw:0,
     onGround:true, jumps:2, boost:33, flip:0, flipDir:0, pitchVis:0, rollVis:0, steerVis:0,
     aiTimer:Math.random()*2, aiJumpCd:0, demoted:0, goals:0, touches:0, demos:0,
-    specialCd:0, spinT:0, shineT:0, demoStreak:0, demoStreakT:0, aiSpecialCd:2+Math.random()*3,
+    specialCd:0, spinT:0, shineT:0, stewT:0, demoStreak:0, demoStreakT:0, aiSpecialCd:2+Math.random()*3,
     persona: isPlayer ? null : PERSONAS[Math.floor(Math.random()*PERSONAS.length)],
   };
   cars.push(car);
@@ -7107,6 +7129,150 @@ function tickMoonJug(dt){
       break;
     }
   }
+}
+
+// ================= ROADKILL (iter 38) =================
+// Critters wander across the pitch. Clobber one and it goes cartwheelin' with a yelp, leavin'
+// behind a mess o' ROADKILL STEW — eat it for BUMPER BEEF (heavy hits + you plow through folks).
+const crossers = [];
+let crossT = 9;
+const ARENA_CRITTERS = [
+  ['chicken','pig','goat'],      // Maw's Barn
+  ['chicken','goat'],            // Frozen Pond
+  ['pig','goat','chicken'],      // Skeeter Bog
+  ['duck','chicken'],            // Mallard Marsh
+];
+// comedy death yelps — a startled squawk that bends as it gets launched
+function critterYelp(kind){
+  if(kind==='chicken'){ beep(1050,0.10,'square',0.16,-500); setTimeout(()=>beep(780,0.16,'square',0.14,-420),80); }
+  else if(kind==='pig'){ beep(520,0.09,'sawtooth',0.16,420); setTimeout(()=>beep(880,0.26,'sawtooth',0.15,-620),90); }
+  else if(kind==='goat'){ beep(430,0.30,'sawtooth',0.15,-170); setTimeout(()=>beep(390,0.18,'square',0.11,-120),150); }
+  else if(kind==='duck'){ beep(340,0.10,'square',0.17,-140); setTimeout(()=>beep(300,0.14,'square',0.15,-160),110); }
+  else { beep(160,0.45,'sawtooth',0.17,-70); }                 // cow: a mournful moo
+}
+function spawnCrosser(){
+  const kinds = ARENA_CRITTERS[lobby.arena] || ARENA_CRITTERS[0];
+  const kind = pick(kinds);
+  const g = (kind==='duck') ? buildDuck() : makeAnimal(kind);
+  if(kind==='duck') g.scale.setScalar(1.5);
+  const side = Math.random()<0.5 ? 1 : -1;
+  const dir = -side;                                            // walk in from one side, cross over
+  g.position.set(side*(ARENA.halfX-4), 0, (Math.random()-0.5)*(ARENA.halfZ*1.5));
+  // box critters face +X at rot 0; the duck model faces +X at rot PI/2
+  g.rotation.y = (kind==='duck') ? (dir>0?Math.PI/2:-Math.PI/2) : (dir>0?0:Math.PI);
+  scene.add(g);
+  crossers.push({ g, kind, dir, spd: 7+Math.random()*6, dead:false, vx:0, vy:0, vz:0, spin:0, ttl:3 });
+}
+function squashCritter(cr, byCar){
+  cr.dead = true; cr.ttl = 2.6;
+  const away = new THREE.Vector3(cr.g.position.x - byCar.pos.x, 0, cr.g.position.z - byCar.pos.z);
+  if(away.lengthSq() < 0.01) away.set(byCar.vel.x, 0, byCar.vel.z);
+  away.normalize();
+  const punch = 12 + Math.min(40, Math.hypot(byCar.vel.x, byCar.vel.z)) * 0.9;
+  cr.vx = away.x*punch + byCar.vel.x*0.45;
+  cr.vz = away.z*punch + byCar.vel.z*0.45;
+  cr.vy = 13 + Math.random()*9;
+  cr.spin = (Math.random()<0.5?-1:1) * (7 + Math.random()*7);
+  critterYelp(cr.kind);
+  thump(0.7);
+  // feathers n' fur
+  for(let i=0;i<16;i++) spawnPart(cr.g.position.x, 1.2, cr.g.position.z,
+    (Math.random()-0.5)*13, 3+Math.random()*9, (Math.random()-0.5)*13,
+    Math.random()<0.5 ? 0xf0ead8 : 0xb08a5a, 0.4+Math.random()*0.3, 0.7);
+  dropRoadkill(cr.g.position.x, cr.g.position.z);
+  crowdHype = Math.max(crowdHype, 0.55);
+  if(byCar.isPlayer){ rumble(220, 0.8, 0.5); announce(pick(ROADKILL_LINES), 2.0); }
+  else chatMsg(byCar.name, byCar.team, pick(["yeehaw, supper!", "that's roadkill, baby", "didn't see it, officer"]));
+}
+const ROADKILL_LINES = ["ROADKILL! FRESH ONE!", "OOH, THAT'S SUPPER!", "SCRAPE IT UP, BOYS!", "HE NEVER STOOD A CHANCE!"];
+function updateCrossers(dt){
+  if(game.state !== 'play'){ return; }
+  crossT -= dt;
+  if(crossT <= 0 && crossers.length < 3){ crossT = 11 + Math.random()*11; spawnCrosser(); }
+  const t = performance.now()/1000;
+  for(let i=crossers.length-1; i>=0; i--){
+    const cr = crossers[i];
+    if(cr.dead){
+      cr.ttl -= dt;
+      cr.vy += GRAV_CAR*dt*0.85;
+      cr.g.position.x += cr.vx*dt; cr.g.position.y += cr.vy*dt; cr.g.position.z += cr.vz*dt;
+      if(cr.g.position.y < 0.3){ cr.g.position.y = 0.3; cr.vy = -cr.vy*0.35; cr.vx*=0.6; cr.vz*=0.6; }
+      cr.g.rotation.z += cr.spin*dt; cr.g.rotation.x += cr.spin*0.7*dt;
+      if(cr.ttl <= 0){ scene.remove(cr.g); disposeTree(cr.g); crossers.splice(i,1); }
+      continue;
+    }
+    // waddle across
+    cr.g.position.x += cr.dir * cr.spd * dt;
+    cr.g.position.y = Math.abs(Math.sin(t*7 + i)) * 0.28;
+    cr.g.rotation.z = Math.sin(t*9 + i) * 0.09;
+    if(Math.abs(cr.g.position.x) > ARENA.halfX + 8){ scene.remove(cr.g); disposeTree(cr.g); crossers.splice(i,1); continue; }
+    // squashed?
+    for(const c of cars){
+      if(c.dead > 0) continue;
+      const dx = c.pos.x - cr.g.position.x, dz = c.pos.z - cr.g.position.z;
+      if(dx*dx + dz*dz < 16 && Math.abs(c.pos.y) < 4){ squashCritter(cr, c); break; }
+    }
+  }
+}
+
+// ---- ROADKILL STEW: the pickup left behind, and the BUMPER BEEF it grants ----
+const roadkills = [];
+const STEW_TIME = 8, STEW_POW = 1.9;
+function dropRoadkill(x, z){
+  const g = new THREE.Group();
+  const splat = new THREE.Mesh(new THREE.CylinderGeometry(2.1, 2.4, 0.35, 10),
+    new THREE.MeshLambertMaterial({ color:0x7a2b22 }));
+  splat.position.y = 0.18; g.add(splat);
+  const pot = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.35, 1.5, 10),
+    new THREE.MeshLambertMaterial({ color:0x3a3a38 }));
+  pot.position.y = 1.05; g.add(pot);
+  const stew = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.0, 0.18, 10),
+    new THREE.MeshLambertMaterial({ color:0x8a5a20, emissive:0x2a1400 }));
+  stew.position.y = 1.85; g.add(stew);
+  const glow = new THREE.Mesh(new THREE.SphereGeometry(2.4, 10, 8),
+    new THREE.MeshBasicMaterial({ color:0xff9a4a, transparent:true, opacity:0.14, blending:THREE.AdditiveBlending, depthWrite:false }));
+  glow.position.y = 1.3; g.add(glow);
+  g.userData.glow = glow;
+  g.position.set(THREE.MathUtils.clamp(x, -ARENA.halfX+4, ARENA.halfX-4), 0,
+                 THREE.MathUtils.clamp(z, -ARENA.halfZ+4, ARENA.halfZ-4));
+  scene.add(g);
+  // arm delay: without it the rig that made the kill is stood right on the drop point and
+  // swallows the stew instantly — nobody ever SEES the pot. Now it's a contested pickup.
+  roadkills.push({ g, ttl: 26, arm: 1.3 });
+}
+function tickRoadkills(dt){
+  const t = performance.now()/1000;
+  for(let i=roadkills.length-1; i>=0; i--){
+    const rk = roadkills[i];
+    rk.ttl -= dt;
+    if(rk.arm > 0) rk.arm -= dt;
+    rk.g.rotation.y += dt*0.9;
+    if(rk.g.userData.glow) rk.g.userData.glow.material.opacity = 0.10 + Math.abs(Math.sin(t*2.2))*0.12;
+    if(Math.random() < 0.25) spawnGlow(rk.g.position.x+(Math.random()-0.5)*2, 2.1, rk.g.position.z+(Math.random()-0.5)*2,
+      0, 3+Math.random()*2, 0, 0xb8a070, 0.5, 0.7, -1);           // steam off the pot
+    if(rk.ttl <= 0){ scene.remove(rk.g); disposeTree(rk.g); roadkills.splice(i,1); continue; }
+    if(rk.arm > 0) continue;                                      // still coolin' — can't grab it yet
+    for(const c of cars){
+      if(c.dead > 0) continue;
+      const dx = c.pos.x - rk.g.position.x, dz = c.pos.z - rk.g.position.z;
+      if(dx*dx + dz*dz < 20){
+        c.stewT = STEW_TIME;
+        burst(rk.g.position.clone().setY(1.6), 0xff9a4a, 26, 15);
+        scene.remove(rk.g); disposeTree(rk.g); roadkills.splice(i,1);
+        crowdHype = Math.max(crowdHype, 0.7);
+        if(c.isPlayer){ rumble(300,1,0.7); announce("ROADKILL STEW — BUMPER BEEF!", 2.4); crowdCheer(1.3); }
+        else chatMsg(c.name, c.team, "ate the stew — I'm comin' through!");
+        break;
+      }
+    }
+  }
+}
+function clearRoadkill(){
+  for(const cr of crossers){ scene.remove(cr.g); disposeTree(cr.g); }
+  crossers.length = 0;
+  for(const rk of roadkills){ scene.remove(rk.g); disposeTree(rk.g); }
+  roadkills.length = 0;
+  crossT = 9;
 }
 
 // ================= GAMEPLAY VARIETY II (iter 37) =================
@@ -7508,6 +7674,9 @@ function updateCar(c, dt, input){
   if(c.shineT > 0){ c.shineT -= dt; if(c.shineT > 0 && Math.random()<0.6)
     spawnGlow(c.pos.x+(Math.random()-0.5)*3, 1+Math.random()*2, c.pos.z+(Math.random()-0.5)*3, 0, 6, 0, 0xa8ff70, 0.35, 0.9, -3); }
   if(c.demoStreakT > 0){ c.demoStreakT -= dt; if(c.demoStreakT <= 0) c.demoStreak = 0; }
+  if(c.stewT > 0){ c.stewT -= dt; if(Math.random()<0.5)
+    spawnGlow(c.pos.x+(Math.random()-0.5)*3, 1+Math.random()*2, c.pos.z+(Math.random()-0.5)*3,
+      0, 4, 0, 0xff9a4a, 0.35, 1.0, -2); }
   // shine + "hawg wild" wildcard = free unlimited boost; else drain the tank
   const shine = c.shineT > 0;
   const freeB = shine || boostFree;
@@ -7756,7 +7925,7 @@ function carBallCollide(c, dt){
     const rel = c.vel.clone().sub(ball.vel);
     const impact = Math.max(0, rel.dot(n));
     // a lit sack hits harder — rallies escalate
-    const pow = c.veh.power * (c.flip>0 ? 1.5 : 1) * (ball.onFire ? 1.22 : 1);
+    const pow = c.veh.power * (c.flip>0 ? 1.5 : 1) * (ball.onFire ? 1.22 : 1) * (c.stewT>0 ? STEW_POW : 1);
     ball.vel.addScaledVector(n, impact*1.35*pow + 6*pow);
     ball.vel.y += 3.5*pow;  // pop-up bias
     ball.vel.addScaledVector(c.vel, 0.35);
@@ -7870,13 +8039,18 @@ function carCarCollide(a, b){
     const imp = rel.dot(n)*0.5;
     if(imp>0){
       const preSa = a.vel.length(), preSb = b.vel.length(); // pre-impact speeds
-      a.vel.addScaledVector(n,-imp); b.vel.addScaledVector(n, imp);
+      // BUMPER BEEF: a stew-fed rig plows through — it shrugs off the shunt and launches the other
+      const aStew = a.stewT > 0, bStew = b.stewT > 0;
+      const aTake = (aStew && !bStew) ? 0.25 : 1, bTake = (bStew && !aStew) ? 0.25 : 1;
+      const aGive = (bStew && !aStew) ? 2.1 : 1, bGive = (aStew && !bStew) ? 2.1 : 1;
+      a.vel.addScaledVector(n, -imp*aTake*aGive); b.vel.addScaledVector(n, imp*bTake*bGive);
       if(imp>10){ thump(0.6); if(a.isPlayer||b.isPlayer) rumble(220, 0.8, 0.4); }
-      // supersonic DEMOLITION (judged on speed BEFORE the hit)
+      // supersonic DEMOLITION (judged on speed BEFORE the hit) — stew lowers the bar to wreck folks
       if(rel.length() > 38 && game.state==='play'){
         const fast = preSa > preSb ? a : b;
         const slow = fast===a ? b : a;
-        if(Math.max(preSa, preSb) > SUPERSONIC) demolish(slow, fast);
+        const bar = fast.stewT > 0 ? SUPERSONIC*0.62 : SUPERSONIC;
+        if(Math.max(preSa, preSb) > bar) demolish(slow, fast);
       }
     }
   }
@@ -8139,6 +8313,7 @@ function startMatch(rematch){
   ball.heat = 0; ball.onFire = false; ball.fireT = 0; ball.touchT = []; ball.spin.set(0,0,0);
   clearWild();
   moonJugT = 14; if(moonJug){ moonJug.visible = false; moonJug.userData.active = false; }
+  clearRoadkill();
   HUD.sb.textContent='0'; HUD.sr.textContent='0';
   HUD.chat.innerHTML='';
   for(const p of pads){ p.timer=0; p.mesh.visible=true; }
@@ -8359,6 +8534,8 @@ function animate(){
       for(let i=0;i<cars.length;i++) for(let j=i+1;j<cars.length;j++) carCarCollide(cars[i],cars[j]);
       tickWildcard(dt);
       tickMoonJug(dt);
+      updateCrossers(dt);
+      tickRoadkills(dt);
     }
 
     // clock

@@ -49,6 +49,10 @@ MA-rated redneck-comedy Rocket League clone, solo vs bots. One self-contained Th
   bot PERSONAS (PERSONAS[], see botInput), LAST CALL final-30s, and RALLY FIRE (rolling touch
   window — a decaying heat pool was tried and NEVER ignited in real play; don't revert to it).
   Goals are no longer always worth 1 — harness asserts must check the score increased.
+- ROADKILL (iter 38) — critters cross the pitch (ARENA_CRITTERS per arena), get launched when hit
+  (squashCritter + critterYelp), and drop a ROADKILL STEW pot granting BUMPER BEEF (c.stewT:
+  x1.9 ball power, wins car contact, lower demo bar). The pot needs its ARM delay or the killer
+  auto-eats it instantly. clearRoadkill() on match start.
 
 ## Workflow (surgical)
 
