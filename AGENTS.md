@@ -57,6 +57,41 @@ MA-rated redneck-comedy Rocket League clone, solo vs bots. One self-contained Th
   x1.9 ball power, wins car contact, lower demo bar). The pot needs its ARM delay or the killer
   auto-eats it instantly. clearRoadkill() on match start.
 
+## Multiplayer / networking (iter 41+, in progress)
+
+Up to 4 players, all from the same URL, empty seats filled by the existing bots.
+**Host-authoritative over WebRTC data channels**; matchmaking = Trystero (embedded, 60 KB IIFE,
+inlined as its own `<script>` block placed BEFORE the game's — `verify.sh` extracts the *last*
+src-less script, so never insert after it). `NET.role` defaults to `'solo'` and nothing initialises
+at load, which is what keeps solo play and the headless harness untouched.
+
+The design seam: every car is already driven by an interchangeable `{throttle,steer,boost}` object
+(`const input = c.isPlayer ? pin : botInput(c,dt)`). Remote players supply that object instead of
+the AI, so **bot-fill is the solo code path** and a dropped player reverts to a bot for free.
+
+**Verified the hard way — do not relearn:**
+1. **Trystero ships ONE default STUN server** (`stun.cloudflare.com`) and it returns ICE error 701
+   (unreachable) on some real networks, leaving no public address to offer → handshake goes
+   `connecting → failed`. **Always pass an explicit redundant `iceServers` list** (`NET_ICE`).
+   Redundancy is mandatory: Twilio's STUN failed on one test network while Cloudflare worked, and
+   the exact reverse was true on another. No single server covered both.
+2. **Nostr's built-in relay list rate-limits** (`"you note too much"`) and never paired two peers.
+   The curated list in `NET_RELAYS` does, reliably. MQTT also works but bundles to 409 KB vs 60 KB.
+   BitTorrent trackers were the least reliable.
+3. **`trickleIce` defaults to false** — candidates ride inside the SDP, so `addIceCandidate` is never
+   called on the happy path. `remoteCand: 0` is normal, not a bug.
+4. **Trystero 0.25 changed the API**: `makeAction()` returns an *object* (`.send` / `.onMessage`),
+   not a `[send, receive]` tuple, and `onPeerJoin`/`onPeerLeave` are *assigned*, not called.
+   `room.ping(peerId)` gives RTT; `room.getPeers()` returns `{peerId: RTCPeerConnection}`.
+5. **Counting RTCPeerConnections tells you nothing** — Trystero pre-creates ~20 per strategy
+   speculatively, even alone in an empty room. To prove two devices found each other, count
+   `setRemoteDescription` calls: that requires a real SDP from a remote peer.
+6. **Two tabs on one machine cannot connect** — ICE host candidates are mDNS-obfuscated (`.local`)
+   and a browser can't resolve another process's name; same-host hairpin NAT needs TURN. For local
+   testing only, Trystero exposes `_test_only_mdnsHostFallbackToLoopback: true`.
+7. **Free anonymous TURN is gone** — the old public `openrelay.metered.ca` credentials gather zero
+   relay candidates. A TURN fallback needs an account. Only ONE side of a pair needs TURN.
+
 ## Workflow (surgical)
 
 - Read the `CHANGELOG` comment at the top of the HTML first — it lists what each iteration did and a

@@ -97,8 +97,8 @@ Object.defineProperty(global, 'navigator', { value: { getGamepads: ()=>[fakePad]
 // ---- load game ----
 const fs=require('fs');
 const src=fs.readFileSync('/tmp/game.js','utf8');
-eval(src + '\n;global.__G={startMatch,cars,game,ball,keys,lobby,pads,camera,camPos};');
-const {startMatch,cars,game,ball,keys,lobby,pads,camera,camPos} = global.__G;
+eval(src + '\n;global.__G={startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,NET};');
+const {startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,NET} = global.__G;
 
 // ---- simulate ----
 function frame(){ const fn=rafQueue.shift(); if(fn) fn(); while(pendingTimeouts.length) pendingTimeouts.shift()(); }
@@ -221,4 +221,33 @@ console.log('TEST C — state:', game.state, 'timeLeft:', game.timeLeft.toFixed(
 if(game.state!=='end' && !game.overtime) throw new Error('match never ended');
 if(Math.abs(ball.pos.x) > 100 || Math.abs(ball.pos.z) > 60) throw new Error('ball escaped arena');
 console.log('rumble events:', rumbles);
+
+// ---- multiplayer seat table (no network involved) ----
+// Solo must be completely unaffected by the presence of the NET module.
+if(NET.role !== 'solo') throw new Error('NET.role should default to solo');
+if(NET.available()) throw new Error('NET.available() should be false with no transport loaded');
+
+// Seats: size*2 total, humans take some, everything left over is a bot.
+NET.slots = NET.buildSlots(2);
+if(NET.slots.length !== 4) throw new Error('2v2 should build 4 seats');
+if(NET.slots.filter(s=>s.team===0).length !== 2) throw new Error('seats not split evenly per team');
+
+// Joiners auto-balance onto the thinner team.
+NET.seatPeer('p1','ONE',0,null); NET.seatPeer('p2','TWO',0,null);
+const perTeam = [0,1].map(t=>NET.slots.filter(s=>s.type==='human'&&s.team===t).length);
+if(perTeam[0]!==1 || perTeam[1]!==1) throw new Error('auto-balance failed: '+perTeam);
+
+// The human cap holds even when seats remain open.
+NET.slots = NET.buildSlots(3);                       // 6 seats
+for(let i=0;i<6;i++) NET.seatPeer('q'+i,'P'+i,0,null);
+if(NET.humanCount() !== 4) throw new Error('human cap should be 4, got '+NET.humanCount());
+if(NET.slots.filter(s=>s.type==='open').length !== 2) throw new Error('leftover seats should stay open for bots');
+
+// A peer leaving frees its seat, which then falls back to a bot.
+const freed = NET.freePeer('q0');
+if(!freed || freed.type !== 'open') throw new Error('leaving peer did not free its seat');
+if(NET.humanCount() !== 3) throw new Error('human count should drop to 3');
+NET.slots = [];
+console.log('multiplayer seat table OK');
+
 console.log('ALL TESTS PASSED');
