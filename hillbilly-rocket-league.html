@@ -1,6 +1,25 @@
 <!DOCTYPE html>
 <!-- ============================================================
 CHANGELOG (upgrade loop — newest first)
+[2026-07-20 iter 39 — AUDIT PASS: six defects found by probing, all fixed]
+1. SCORING BUG: a goal nobody touched inherited the LAST rally's trick-shot bookkeeping and paid a
+   bogus HOWITZER bonus (measured: untouched ball scored 2). Kickoff now clears shotFromX/Air/
+   Special/lastTouch, and goalValue() short-circuits to 1 with no toucher. Real trick shots still
+   pay 2 (verified end-to-end).
+2. VISUAL: the ball rolled clean THROUGH critters. It now flattens them too (same yelp, feathers
+   and stew drop) when movin' over 12 — credited to whoever last touched it.
+3. VISUAL: the marsh's walking duck sat half-buried in the turf with its wings splayed in the
+   flight pose — it read as roadkill before anyone hit it. buildDuck() is authored for flight
+   (body on the group origin), so crossers now carry a yOff (0.95) and tuck their wings.
+4. VISUAL: the LAST CALL red pulsing clock stayed on through overtime, so "OT" sat there glowing
+   angry red forever. Cleared when overtime starts.
+5. VISUAL: the amber landing ring kept tracking the ball through goal celebrations, adding noise
+   under the fireworks. Now play-state only.
+6. Specials could fire during the countdown (measured: whacked the ball 52 pre-kickoff when placed
+   in range). Restricted to live play.
+Harness: goal-camera test now pins the BALL as well as the car — a bot scoring mid-test fired
+resetKickoff INSIDE frame(), yanking the car out of the goal before updateCamera ran. 0 failures
+in 30 runs. 6.2ms/frame on the heaviest case.
 [2026-07-20 iter 38 — ROADKILL: critters cross the pitch, get flattened, drop stew, per user request]
 - Arena-appropriate critters wander across the floor every ~11-22s (max 3 at once): barn gets
   chicken/pig/goat, pond chicken/goat, bog pig/goat/chicken, marsh DUCK/chicken (reuses the
@@ -7020,7 +7039,7 @@ function ballKick(c, radius, power, up){
 }
 function useSpecial(c){
   if(!c || c.dead > 0 || c.specialCd > 0 || game.paused) return;
-  if(game.state !== 'play' && game.state !== 'countdown') return;
+  if(game.state !== 'play') return;                  // no pre-kickoff ball-whackin'
   c.specialCd = SPECIAL_CD;
   const f = carForward(c);
   const ahead = c.pos.clone().addScaledVector(f, 4);
@@ -7154,14 +7173,24 @@ function spawnCrosser(){
   const kinds = ARENA_CRITTERS[lobby.arena] || ARENA_CRITTERS[0];
   const kind = pick(kinds);
   const g = (kind==='duck') ? buildDuck() : makeAnimal(kind);
-  if(kind==='duck') g.scale.setScalar(1.5);
+  // the duck model is built for FLIGHT (body on the group origin, wings splayed) — on the deck it
+  // sat half-buried lookin' like roadkill already. Lift it onto its feet and tuck the wings in.
+  let yOff = 0;
+  if(kind==='duck'){
+    g.scale.setScalar(1.5);
+    yOff = 0.95;
+    const wL = g.userData.wL, wR = g.userData.wR;
+    if(wL) wL.rotation.z = -0.5;
+    if(wR) wR.rotation.z = 0.5;
+  }
   const side = Math.random()<0.5 ? 1 : -1;
   const dir = -side;                                            // walk in from one side, cross over
   g.position.set(side*(ARENA.halfX-4), 0, (Math.random()-0.5)*(ARENA.halfZ*1.5));
   // box critters face +X at rot 0; the duck model faces +X at rot PI/2
   g.rotation.y = (kind==='duck') ? (dir>0?Math.PI/2:-Math.PI/2) : (dir>0?0:Math.PI);
   scene.add(g);
-  crossers.push({ g, kind, dir, spd: 7+Math.random()*6, dead:false, vx:0, vy:0, vz:0, spin:0, ttl:3 });
+  g.position.y = yOff;
+  crossers.push({ g, kind, dir, yOff, spd: 7+Math.random()*6, dead:false, vx:0, vy:0, vz:0, spin:0, ttl:3 });
 }
 function squashCritter(cr, byCar){
   cr.dead = true; cr.ttl = 2.6;
@@ -7196,21 +7225,31 @@ function updateCrossers(dt){
       cr.ttl -= dt;
       cr.vy += GRAV_CAR*dt*0.85;
       cr.g.position.x += cr.vx*dt; cr.g.position.y += cr.vy*dt; cr.g.position.z += cr.vz*dt;
-      if(cr.g.position.y < 0.3){ cr.g.position.y = 0.3; cr.vy = -cr.vy*0.35; cr.vx*=0.6; cr.vz*=0.6; }
+      const floor = 0.3 + cr.yOff;
+      if(cr.g.position.y < floor){ cr.g.position.y = floor; cr.vy = -cr.vy*0.35; cr.vx*=0.6; cr.vz*=0.6; }
       cr.g.rotation.z += cr.spin*dt; cr.g.rotation.x += cr.spin*0.7*dt;
       if(cr.ttl <= 0){ scene.remove(cr.g); disposeTree(cr.g); crossers.splice(i,1); }
       continue;
     }
     // waddle across
     cr.g.position.x += cr.dir * cr.spd * dt;
-    cr.g.position.y = Math.abs(Math.sin(t*7 + i)) * 0.28;
+    cr.g.position.y = cr.yOff + Math.abs(Math.sin(t*7 + i)) * 0.28;
     cr.g.rotation.z = Math.sin(t*9 + i) * 0.09;
     if(Math.abs(cr.g.position.x) > ARENA.halfX + 8){ scene.remove(cr.g); disposeTree(cr.g); crossers.splice(i,1); continue; }
-    // squashed?
+    // squashed by a rig?
+    let hit = false;
     for(const c of cars){
       if(c.dead > 0) continue;
       const dx = c.pos.x - cr.g.position.x, dz = c.pos.z - cr.g.position.z;
-      if(dx*dx + dz*dz < 16 && Math.abs(c.pos.y) < 4){ squashCritter(cr, c); break; }
+      if(dx*dx + dz*dz < 16 && Math.abs(c.pos.y) < 4){ squashCritter(cr, c); hit = true; break; }
+    }
+    // ...or run down by the sack itself, which used to roll clean THROUGH them
+    if(!hit && ball.pos.y < BALL_R*1.8){
+      const bx = ball.pos.x - cr.g.position.x, bz = ball.pos.z - cr.g.position.z;
+      const rr = BALL_R + 1.6;
+      if(bx*bx + bz*bz < rr*rr && Math.hypot(ball.vel.x, ball.vel.z) > 12){
+        squashCritter(cr, ball.lastTouch || { pos: ball.pos, vel: ball.vel, isPlayer:false, name:'THE SACK', team:0 });
+      }
     }
   }
 }
@@ -7354,6 +7393,7 @@ function tickLastCall(){
 // base 1 · +1 for a howitzer / air mail / special-move finish · doubled during LAST CALL
 function goalValue(team){
   let pts = 1, tag = null;
+  if(!ball.lastTouch) return { pts: game.lastCall ? 2 : 1, tag: game.lastCall ? "(LAST CALL — DOUBLE!)" : null };
   const goalX = team===0 ? ARENA.halfX : -ARENA.halfX;
   const range = Math.abs(goalX - ball.shotFromX);
   if(ball.shotSpecial){ pts = 2; tag = "SIGNATURE FINISH!"; }
@@ -7899,7 +7939,7 @@ function updateBall(dt){
   ballMesh.rotation.z -= ball.vel.x*dt/BALL_R;
   // landing ring under an airborne ball — grows and brightens with height
   const airH = ball.pos.y - BALL_R;
-  landRing.visible = airH > 2.5;
+  landRing.visible = airH > 2.5 && game.state === 'play';   // not during the goal fireworks
   if(landRing.visible){
     landRing.position.set(ball.pos.x, 0.08, ball.pos.z);
     const pulse = 1 + Math.sin(performance.now()/180)*0.06;
@@ -8178,6 +8218,9 @@ function resetKickoff(){
       c.mesh.position.copy(c.pos); c.mesh.rotation.set(0,c.yaw,0);
     }
   });
+  // clear trick-shot bookkeeping — otherwise a goal nobody touched inherits the LAST rally's
+  // data and pays a bogus HOWITZER bonus (measured: an untouched ball scored 2)
+  ball.shotFromX = 0; ball.shotAir = false; ball.shotSpecial = false; ball.lastTouch = null;
   game.state='countdown'; game.countdownT = 3.4;
   // kickoff cinematic: park the camera high and wide over midfield — the normal camera lerp
   // swoops it down behind yer car through the countdown (free drama, three lines)
@@ -8546,6 +8589,8 @@ function animate(){
         game.timeLeft = 0;
         if(game.score[0]===game.score[1]){
           game.overtime = true;
+          game.lastCall = false;                       // the red LAST CALL clock hung around into OT
+          if(HUD.clock && HUD.clock.classList) HUD.clock.classList.remove('lastcall');
           announceVO('overtime', 4);
           resetKickoff();
         } else endMatch();

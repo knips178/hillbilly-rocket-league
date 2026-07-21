@@ -178,7 +178,14 @@ if(Math.abs(camPos.z) > 52 && camPos.y < 8.5) throw new Error('camera behind the
 // reset yanks the player back to midfield so the camera legitimately leaves the goal — another
 // pre-existing flake. Holding position keeps the test about the CAMERA, not about bot randomness.
 game.player.pos.set(88, 0, 0); ball.pos.set(0, 4.4, 0); ball.vel.set(0,0,0);
-for(let i=0;i<120;i++){ game.player.pos.set(88, 0, 0); game.player.vel.set(0,0,0); frame(); }
+// pin the BALL at centre too: a bot scoring mid-test fires resetKickoff INSIDE frame(), which
+// yanks the car out of the goal before updateCamera runs, so the camera legitimately leaves the
+// recess and the assert trips. Freezing the ball keeps this test about the camera alone.
+for(let i=0;i<120;i++){
+  game.player.pos.set(88, 0, 0); game.player.vel.set(0,0,0);
+  ball.pos.set(0, 4.4, 0); ball.vel.set(0,0,0);
+  frame();
+}
 console.log('goal camera test — camPos:', camPos.x.toFixed(1), camPos.y.toFixed(1), camPos.z.toFixed(1));
 if(camPos.x < 82) throw new Error('camera did not follow the car into the goal');
 if(camPos.x > 82+26-2.4) throw new Error('camera punched out the back of the goal');
