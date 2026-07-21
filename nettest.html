@@ -32,80 +32,124 @@ mqtt/dist/mqtt.esm.js:
   body{font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
        background:#16130f;color:#e8dcc4;margin:0;padding:16px;max-width:760px;margin:0 auto}
   h1{font:bold 22px Trebuchet MS;color:#e0b458;margin:0 0 2px}
-  .sub{color:#a89372;font-size:13px;margin-bottom:16px}
+  .sub{color:#a89372;font-size:13px;margin-bottom:14px}
+  .steps{background:#1c1812;border:2px solid #4a3f2c;border-radius:10px;padding:12px;font-size:14px;margin-bottom:14px}
+  .steps b{color:#e0b458}
   label{display:block;font-size:13px;color:#c9a15f;margin:12px 0 4px}
-  input{width:100%;padding:12px;font-size:17px;border-radius:8px;border:2px solid #5a4a30;
-        background:#221d16;color:#e8dcc4}
+  input{width:100%;padding:12px;font-size:20px;font-weight:bold;letter-spacing:2px;text-align:center;
+        border-radius:8px;border:2px solid #5a4a30;background:#221d16;color:#e8dcc4}
   button{width:100%;padding:16px;font:bold 18px Trebuchet MS;margin-top:14px;border-radius:10px;
          border:none;background:#c9702b;color:#fff}
   button:disabled{opacity:.45}
   button.sec{background:#3a3226;color:#e8dcc4;font-size:15px;padding:12px}
+  .big{margin-top:14px;padding:16px;border-radius:10px;font-weight:bold;text-align:center;font-size:17px;
+       border:2px solid #5a4a30;background:#2a2519;color:#e0b458}
+  .big.ok{background:#1e3d22;color:#8ee89c;border-color:#3f7a48}
+  .big.bad{background:#3d1e1a;color:#ffab99;border-color:#7a3f36}
+  .big.mid{background:#3a3016;color:#ffd88a;border-color:#8a6f2e}
   .card{border:2px solid #4a3f2c;border-radius:10px;padding:12px;margin-top:12px;background:#1c1812}
   .card h2{font:bold 16px Trebuchet MS;margin:0 0 6px;display:flex;align-items:center;gap:8px}
   .dot{width:11px;height:11px;border-radius:50%;background:#6b6152;flex:none}
   .dot.ok{background:#5ac46a}.dot.warn{background:#e0b458}.dot.bad{background:#d1543f}
   .kv{font:12px ui-monospace,Menlo,monospace;color:#b8a888;white-space:pre-wrap;word-break:break-word}
-  .verdict{margin-top:16px;padding:14px;border-radius:10px;font-weight:bold;text-align:center;font-size:16px}
-  .v-ok{background:#1e3d22;color:#8ee89c;border:2px solid #3f7a48}
-  .v-bad{background:#3d1e1a;color:#ffab99;border:2px solid #7a3f36}
-  .v-wait{background:#2a2519;color:#e0b458;border:2px solid #5a4a30}
 </style>
 
 <h1>🎮 Hillbilly RL — Connection Test</h1>
-<div class="sub">Open this on <b>two different devices</b>. Use the same room code on both.
-One on WiFi, one on <b>cell data</b> is the best test.</div>
+<div class="sub">Checks whether two devices can reach each other for multiplayer.</div>
 
-<label>Room code (must match on both devices)</label>
-<input id="room" value="" autocapitalize="characters" autocomplete="off">
+<div class="steps">
+  <b>1.</b> Open this page on <b>both</b> devices.<br>
+  <b>2.</b> Leave the room code as <b>HRLTEST</b> on both — don't change it.<br>
+  <b>3.</b> Press START on both, <b>within about 30 seconds of each other</b>.<br>
+  <b>4.</b> Wait for it to finish, then press COPY RESULTS on <b>each</b> device.<br>
+  <span style="color:#d1a06a">Both devices must be running at the same time — that's the whole test.</span>
+</div>
+
+<label>Room code — must be identical on both devices</label>
+<input id="room" value="HRLTEST" autocapitalize="characters" autocomplete="off" spellcheck="false">
 <button id="go">▶️  START TEST</button>
 
+<div id="status" class="big" style="display:none">…</div>
 <div id="cards"></div>
-<div id="verdict" class="verdict v-wait" style="display:none"></div>
-<button id="copy" class="sec" style="display:none">📋 COPY RESULTS (paste these back to Claude)</button>
+<button id="copy" class="sec" style="display:none">📋 COPY RESULTS (paste back to Claude)</button>
 
 <script>
 const STRATS = ['mqtt','torrent','nostr'];
 const LABEL  = {mqtt:'MQTT brokers', torrent:'BitTorrent trackers', nostr:'Nostr relays (curated)'};
-// Nostr's built-in defaults were rate-limiting hard ("you note too much"), so pin known-good relays.
 const NOSTR_RELAYS = ['wss://relay.damus.io','wss://nos.lol','wss://relay.primal.net','wss://relay.nostr.band'];
-const LOOPBACK = new URLSearchParams(location.search).has('loopback'); // local same-machine testing only
+const LOOPBACK = new URLSearchParams(location.search).has('loopback');
 const TEST_SECS = 75;
 
 const q = new URLSearchParams(location.search);
-document.getElementById('room').value = (q.get('r') || 'HRL' + Math.floor(Math.random()*90+10)).toUpperCase();
+if(q.get('r')) document.getElementById('room').value = q.get('r').toUpperCase();
 
-const R = {};          // per-strategy results
+const R = {};
 const cardsEl = document.getElementById('cards');
 
-// Instrument WebSocket so we can see which relays actually come up.
+// --- Classify relay sockets by URL, so counts can't be misattributed between strategies.
 const _WS = window.WebSocket;
 window.WSLOG = [];
+function classify(u){
+  u = u.toLowerCase();
+  if(/mosquitto|emqx|shiftr|hivemq|mqtt/.test(u)) return 'mqtt';
+  if(/nostr|damus|nos\.lol|primal|relayable|snort/.test(u)) return 'nostr';
+  if(/tracker|torrent|btorrent|webtorrent/.test(u)) return 'torrent';
+  return 'other';
+}
 window.WebSocket = function(u,p){
-  const rec={url:String(u),state:'connecting'}; window.WSLOG.push(rec);
+  const rec={url:String(u), strat:classify(String(u)), state:'connecting'};
+  window.WSLOG.push(rec);
   const w = p===undefined ? new _WS(u) : new _WS(u,p);
   w.addEventListener('open', ()=>rec.state='open');
-  w.addEventListener('error',()=>rec.state='error');
+  w.addEventListener('error',()=>{ if(rec.state!=='open') rec.state='error'; });
   w.addEventListener('close',()=>{ if(rec.state!=='open') rec.state='closed'; });
   return w;
 };
 window.WebSocket.prototype=_WS.prototype; Object.assign(window.WebSocket,_WS);
 
+// --- THE KEY DIAGNOSTIC ---------------------------------------------------
+// Trystero only fires onPeerJoin after WebRTC fully connects, so "no peer" is
+// ambiguous between "nobody was there" and "couldn't reach them".
+// Counting RTCPeerConnections does NOT work: Trystero pre-creates them
+// speculatively (measured: 60 while alone in an empty room).
+// What only ever happens with a real remote device is setRemoteDescription --
+// that requires an actual SDP from someone else. So:
+//   remoteSDP == 0  -> never heard from the other device. Room/signaling problem.
+//   remoteSDP  > 0  -> signaling worked, WebRTC link failed. TURN needed.
+const _PC = window.RTCPeerConnection;
+window.PCSTAT = {created:0, remoteSDP:0, remoteCand:0, states:{}};
+window.RTCPeerConnection = function(cfg){
+  const pc = new _PC(cfg);
+  window.PCSTAT.created++;
+  const _srd = pc.setRemoteDescription.bind(pc);
+  pc.setRemoteDescription = d => { window.PCSTAT.remoteSDP++; return _srd(d); };
+  const _aic = pc.addIceCandidate.bind(pc);
+  pc.addIceCandidate = c => { window.PCSTAT.remoteCand++; return _aic(c); };
+  pc.addEventListener('connectionstatechange', ()=>{
+    const s=pc.connectionState; window.PCSTAT.states[s]=(window.PCSTAT.states[s]||0)+1;
+  });
+  return pc;
+};
+window.RTCPeerConnection.prototype=_PC.prototype; Object.assign(window.RTCPeerConnection,_PC);
+
 function card(s){
-  const d=document.createElement('div'); d.className='card'; d.id='card-'+s;
+  const d=document.createElement('div'); d.className='card';
   d.innerHTML='<h2><span class="dot" id="dot-'+s+'"></span>'+LABEL[s]+'</h2><div class="kv" id="kv-'+s+'">waiting…</div>';
   cardsEl.appendChild(d);
 }
 function setCard(s){
-  const r=R[s], dot=document.getElementById('dot-'+s), kv=document.getElementById('kv-'+s);
-  dot.className='dot '+(r.peers>0 ? (r.rttN>0?'ok':'warn') : (r.relaysUp>0?'warn':'bad'));
-  const rtts=r.rtt.slice().sort((a,b)=>a-b);
-  kv.textContent=
+  const r=R[s];
+  const ws=window.WSLOG.filter(w=>w.strat===s);
+  r.relaysUp=ws.filter(w=>w.state==='open').length; r.relaysTried=ws.length;
+  const dot=document.getElementById('dot-'+s);
+  dot.className='dot '+(r.rttN>0?'ok':(r.peers>0?'warn':(r.relaysUp>0?'warn':'bad')));
+  const t=r.rtt.slice().sort((a,b)=>a-b);
+  document.getElementById('kv-'+s).textContent=
     'relays up : '+r.relaysUp+'/'+r.relaysTried+'\n'+
-    'peers     : '+r.peers+(r.everPeer?'  (seen: '+r.everPeer+')':'')+'\n'+
+    'peers     : '+r.peers+(r.everPeer?'  (seen '+r.everPeer+')':'')+'\n'+
     'data msgs : '+r.rttN+'\n'+
-    (rtts.length? 'rtt ms    : avg '+Math.round(rtts.reduce((a,b)=>a+b,0)/rtts.length)+
-                  '  p95 '+Math.round(rtts[Math.floor(rtts.length*0.95)]||rtts[rtts.length-1])+
-                  '  max '+Math.round(rtts[rtts.length-1])+'\n' : '')+
+    (t.length? 'rtt ms    : avg '+Math.round(t.reduce((a,b)=>a+b,0)/t.length)+
+               '  p95 '+Math.round(t[Math.floor(t.length*0.95)]||t[t.length-1])+'\n':'')+
     'ice route : '+(r.ice||'—')+'\n'+
     (r.err? 'error     : '+r.err+'\n':'');
 }
@@ -119,88 +163,96 @@ function startStrategy(s, room){
     if(s==='nostr') cfg.relayConfig={ urls:NOSTR_RELAYS, redundancy:4 };
     if(LOOPBACK) cfg._test_only_mdnsHostFallbackToLoopback=true;
     r = HRLNet[s](cfg, room);
-  }catch(e){ R[s].err=e.message; setCard(s); return; }
+  }catch(e){ R[s].err=e.message; setCard(s); return null; }
 
-  // Trystero 0.25 API: makeAction returns an object; handlers are assigned, not called.
   const echo = r.makeAction('echo');
-  echo.onMessage = (d, ctx)=>{ if(d && d.reply) echo.send({ack:d.n}, {target:ctx.peerId}); };
-
+  echo.onMessage = (d,ctx)=>{ if(d && d.reply) echo.send({ack:d.n},{target:ctx.peerId}); };
   r.onPeerJoin = ()=>{ R[s].everPeer++; };
   r.onPeerLeave = ()=>{};
 
   let n=0;
   const iv=setInterval(async()=>{
-    const peers=r.getPeers(); const ids=Object.keys(peers);
-    R[s].peers=ids.length;
-    if(ids.length){
-      echo.send({reply:true, n:n++, pad:'x'.repeat(200)});   // real payload over the data channel
-      try{ const ms = await r.ping(ids[0]); R[s].rtt.push(ms); R[s].rttN++; }catch(e){}
-    }
-    // which ICE route actually won? this tells us whether TURN is needed.
-    if(ids.length && !R[s].ice){
-      try{
-        const stats=await peers[ids[0]].getStats();
-        let pair=null, cands={};
-        stats.forEach(v=>{ if(v.type==='candidate-pair'&&v.state==='succeeded'&&v.nominated) pair=v;
-                           if(v.type==='local-candidate'||v.type==='remote-candidate') cands[v.id]=v; });
-        if(pair){
-          const l=cands[pair.localCandidateId], rm=cands[pair.remoteCandidateId];
-          if(l&&rm) R[s].ice=l.candidateType+' ⇄ '+rm.candidateType+
-            ((l.candidateType==='relay'||rm.candidateType==='relay')?'  (TURN RELAY)':'  (direct P2P)');
+    try{
+      const peers=r.getPeers(), ids=Object.keys(peers);
+      R[s].peers=ids.length;
+      if(ids.length){
+        echo.send({reply:true,n:n++,pad:'x'.repeat(200)});
+        try{ R[s].rtt.push(await r.ping(ids[0])); R[s].rttN++; }catch(e){}
+        if(!R[s].ice){
+          const stats=await peers[ids[0]].getStats();
+          let pair=null, c={};
+          stats.forEach(v=>{ if(v.type==='candidate-pair'&&v.state==='succeeded'&&v.nominated) pair=v;
+                             if(v.type==='local-candidate'||v.type==='remote-candidate') c[v.id]=v; });
+          if(pair){ const l=c[pair.localCandidateId], rm=c[pair.remoteCandidateId];
+            if(l&&rm) R[s].ice=l.candidateType+' / '+rm.candidateType+
+              ((l.candidateType==='relay'||rm.candidateType==='relay')?'  (TURN RELAY)':'  (direct P2P)'); }
         }
-      }catch(e){}
-    }
-    const ws=window.WSLOG.filter(w=>w._s===s||(!w._s&&(w._s=s)));
-    R[s].relaysTried=ws.length; R[s].relaysUp=ws.filter(w=>w.state==='open').length;
-    setCard(s);
-  }, 700);
-
+      }
+      setCard(s);
+    }catch(e){}
+  }, 800);
   return ()=>{ clearInterval(iv); try{r.leave()}catch(e){} };
+}
+
+function overall(final){
+  const st=document.getElementById('status'); st.style.display='block';
+  const connected=STRATS.filter(s=>R[s]&&R[s].rttN>0);
+  const pcs=window.PCSTAT.remoteSDP;
+  if(connected.length){
+    st.className='big ok';
+    st.textContent='✅ CONNECTED — '+connected.map(s=>LABEL[s].split(' ')[0]).join(', ');
+  } else if(pcs>0){
+    st.className='big mid';
+    st.textContent=(final?'⚠️ ':'⏳ ')+'Other device SEEN (handshake started) but the link failed'
+      +(final?' — needs a TURN relay':'…');
+  } else {
+    st.className='big '+(final?'bad':'');
+    st.textContent=final ? '❌ Never saw the other device at all'
+                         : '⏳ Waiting for the other device… (none seen yet)';
+  }
 }
 
 document.getElementById('go').onclick=()=>{
   const room=document.getElementById('room').value.trim().toUpperCase();
   if(!room) return;
-  document.getElementById('go').disabled=true;
-  document.getElementById('go').textContent='⏳ TESTING… ('+TEST_SECS+'s)';
+  const go=document.getElementById('go');
+  go.disabled=true; go.textContent='⏳ TESTING… ('+TEST_SECS+'s)';
   history.replaceState(null,'','?r='+encodeURIComponent(room));
   const stops=STRATS.map(s=>startStrategy(s,room)).filter(Boolean);
-
   let left=TEST_SECS;
   const cd=setInterval(()=>{
-    left--; document.getElementById('go').textContent='⏳ TESTING… ('+left+'s)';
-    const v=document.getElementById('verdict'); v.style.display='block';
-    const okNow=STRATS.filter(s=>R[s]&&R[s].rttN>0);
-    v.className='verdict '+(okNow.length?'v-ok':'v-wait');
-    v.textContent=okNow.length? '✅ CONNECTED via '+okNow.map(s=>LABEL[s].split(' ')[0]).join(', ')
-                              : '⏳ looking for the other device…';
+    left--; go.textContent='⏳ TESTING… ('+left+'s)';
+    overall(false);
     if(left<=0){
-      clearInterval(cd); stops.forEach(f=>f());
-      const good=STRATS.filter(s=>R[s]&&R[s].rttN>0);
-      v.className='verdict '+(good.length?'v-ok':'v-bad');
-      v.textContent=good.length
-        ? '✅ IT WORKS — '+good.length+' of 3 methods connected end-to-end.'
-        : '❌ No peer-to-peer connection. Copy the results below.';
-      document.getElementById('go').textContent='▶️  RUN AGAIN'; document.getElementById('go').disabled=false;
+      clearInterval(cd); stops.forEach(f=>f()); overall(true);
+      go.textContent='▶️  RUN AGAIN'; go.disabled=false;
       document.getElementById('copy').style.display='block';
     }
   },1000);
 };
 
 document.getElementById('copy').onclick=()=>{
-  const txt='HRL CONN TEST\nUA: '+navigator.userAgent+'\nroom: '+document.getElementById('room').value+'\n\n'+
+  const P=window.PCSTAT;
+  const pcStates=JSON.stringify(P.states);
+  const txt='HRL CONN TEST v2\nUA: '+navigator.userAgent+
+    '\nroom: '+document.getElementById('room').value+
+    '\nremoteSDP: '+P.remoteSDP+'  remoteCand: '+P.remoteCand+
+    '  pcCreated: '+P.created+'  states: '+pcStates+'\n\n'+
     STRATS.map(s=>{
-      const r=R[s]||{}; const t=(r.rtt||[]).slice().sort((a,b)=>a-b);
+      const r=R[s]; if(!r) return LABEL[s]+'\n  NOT STARTED';
+      const t=r.rtt.slice().sort((a,b)=>a-b);
       return LABEL[s]+'\n  relays '+r.relaysUp+'/'+r.relaysTried+'  peers '+r.peers+
-        '  everPeer '+r.everPeer+'  msgs '+r.rttN+
-        (t.length?'\n  rtt avg '+Math.round(t.reduce((a,b)=>a+b,0)/t.length)+' p95 '+Math.round(t[Math.floor(t.length*0.95)]||t[t.length-1]):'')+
+        '  seen '+r.everPeer+'  msgs '+r.rttN+
+        (t.length?'\n  rtt avg '+Math.round(t.reduce((a,b)=>a+b,0)/t.length)+
+                  ' p95 '+Math.round(t[Math.floor(t.length*0.95)]||t[t.length-1]):'')+
         '\n  ice '+(r.ice||'none')+(r.err?'\n  err '+r.err:'');
-    }).join('\n\n');
+    }).join('\n\n')+
+    '\n\nall sockets:\n'+window.WSLOG.map(w=>'  ['+w.strat+'] '+w.state+' '+w.url).join('\n');
   const ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta);
   ta.select(); try{document.execCommand('copy')}catch(e){}
   if(navigator.clipboard) navigator.clipboard.writeText(txt).catch(()=>{});
   ta.remove();
-  document.getElementById('copy').textContent='✅ COPIED — paste it back to Claude';
+  document.getElementById('copy').textContent='✅ COPIED — paste back to Claude';
 };
 </script>
 
