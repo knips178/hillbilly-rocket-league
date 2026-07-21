@@ -87,6 +87,18 @@ const LOOPBACK=new URLSearchParams(location.search).has('loopback');
 const TEST_SECS=70;
 let STRAT='nostr';
 
+// Trystero ships exactly ONE default STUN server (stun.cloudflare.com), which
+// returned ICE error 701 (unreachable) on the real test network -- so no srflx
+// candidates could be gathered and cross-network connection was impossible.
+// Always pass an explicit, redundant list.
+const ICE_SERVERS=[
+  {urls:['stun:stun.l.google.com:19302',
+         'stun:stun1.l.google.com:19302',
+         'stun:stun2.l.google.com:19302']},
+  {urls:'stun:global.stun.twilio.com:3478'},
+  {urls:'stun:stun.cloudflare.com:3478'}
+];
+
 const q=new URLSearchParams(location.search);
 if(q.get('r')) document.getElementById('room').value=q.get('r').toUpperCase();
 if(q.get('s')&&LABEL[q.get('s')]) STRAT=q.get('s');
@@ -131,7 +143,7 @@ window.RTCPeerConnection=function(cfg){
 };
 window.RTCPeerConnection.prototype=_PC.prototype; Object.assign(window.RTCPeerConnection,_PC);
 
-const RES={peers:0,everPeer:0,rtt:[],rttN:0,ice:'',err:'',candTypes:{}};
+const RES={peers:0,everPeer:0,rtt:[],rttN:0,ice:'',err:'',candTypes:{},stunOk:{}};
 
 function render(final){
   const st=document.getElementById('status'), kv=document.getElementById('kv');
@@ -155,6 +167,7 @@ function render(final){
               '  p95 '+Math.round(t[Math.floor(t.length*0.95)]||t[t.length-1])+'\n':'')+
     'ice route  : '+(RES.ice||'—')+'\n'+
     'my cands   : '+(Object.keys(RES.candTypes).join(',')||'—')+'\n'+
+    'stun ok    : '+(Object.keys(RES.stunOk).join(' ')||'—')+'\n'+
     'pc states  : '+JSON.stringify(P.states)+'\n'+
     'pc created : '+P.created+
     (RES.err?'\nerror      : '+RES.err:'')+
@@ -169,7 +182,7 @@ document.getElementById('go').onclick=()=>{
 
   let r;
   try{
-    const cfg={appId:'hrl-conn-test-v1'};
+    const cfg={appId:'hrl-conn-test-v1', rtcConfig:{iceServers:ICE_SERVERS}};
     if(STRAT==='nostr') cfg.relayConfig={urls:NOSTR_RELAYS,redundancy:4};
     if(LOOPBACK) cfg._test_only_mdnsHostFallbackToLoopback=true;
     r=HRLNet[STRAT](cfg,room);
@@ -177,9 +190,10 @@ document.getElementById('go').onclick=()=>{
 
   // what kinds of candidate can this network even produce? (srflx missing => STUN blocked)
   try{
-    const probe=new _PC({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
+    const probe=new _PC({iceServers:ICE_SERVERS});
     probe.createDataChannel('p');
-    probe.onicecandidate=e=>{ if(e.candidate) RES.candTypes[e.candidate.type||'?']=1; else probe.close(); };
+    probe.onicecandidate=e=>{ if(e.candidate){ RES.candTypes[e.candidate.type||'?']=1;
+      if(e.candidate.type==='srflx'&&e.candidate.url) RES.stunOk[e.candidate.url]=1; } else probe.close(); };
     probe.createOffer().then(o=>probe.setLocalDescription(o));
     setTimeout(()=>{try{probe.close()}catch(e){}},9000);
   }catch(e){}
