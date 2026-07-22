@@ -57,6 +57,21 @@ MA-rated redneck-comedy Rocket League clone, solo vs bots. One self-contained Th
   x1.9 ball power, wins car contact, lower demo bar). The pot needs its ARM delay or the killer
   auto-eats it instantly. clearRoadkill() on match start.
 
+## Multiplayer: CONFIRMED WORKING end-to-end (2026-07-22)
+
+Mac hosting + iPhone on **cell data** connected and played a full match. The path is
+Nostr matchmaking -> STUN -> TURN relay -> host-authoritative snapshots. Guests install nothing
+and need no credentials; they open a URL.
+
+Two traps that cost real debugging time, both now fixed -- don't reintroduce:
+1. **Relay settings must be set BEFORE the room is created.** `rtcConfig` is read once inside
+   `NET.join()`. They originally lived in the waitin' room, i.e. only reachable *after* hosting, so
+   they never applied. Wifi hid it completely (a direct link needs no relay).
+2. **"Relay configured" is not "relay works."** Credentials that look right but fail produce exactly
+   one symptom: nobody joins. Keep the TEST button (gathers ICE against the real config and checks a
+   `relay` candidate actually comes back) and keep the waitin' room CONNECTION INFO readout
+   (`remoteSDP > 0` = the devices found each other, so any failure is the peer link, not matchmaking).
+
 ## Multiplayer invariants (keep these working)
 
 - **Solo must never regress.** `NET.role` defaults to `'solo'`, nothing initialises at load, and the
