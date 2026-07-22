@@ -57,6 +57,26 @@ MA-rated redneck-comedy Rocket League clone, solo vs bots. One self-contained Th
   x1.9 ball power, wins car contact, lower demo bar). The pot needs its ARM delay or the killer
   auto-eats it instantly. clearRoadkill() on match start.
 
+## Multiplayer invariants (keep these working)
+
+- **Solo must never regress.** `NET.role` defaults to `'solo'`, nothing initialises at load, and the
+  headless harness runs with no network. Every solo code path is the same one it always was.
+- **Roster is authoritative and ordered.** The host bakes bot names/vehicles/seat order into
+  `NET.roster` and ships it with the `start` event. `cars[]` is built from it on every machine, so
+  snapshot index N means the same car everywhere. Never spawn networked cars from local randomness.
+- **Host simulates, clients render.** Clients run no physics except predicting their own car
+  (`NET.applySnapshots`). Guard any new simulation with `NET.role !== 'client'` — the clock already is.
+- **The local car is predicted, never awaited.** Relay RTT is ~122ms; waiting on the host makes
+  steering feel broken. Correction is 12%/snapshot, teleport past 9 units.
+- **Edge-triggered inputs ride as counters** (`_jumpSeq`, `_specSeq`), not booleans, so a dropped or
+  reordered packet can't swallow or duplicate a press.
+- **Split any new event into sim + presentation halves** (see `scoreGoal` / `presentGoal`): the host
+  mutates state and broadcasts, both sides run the presentation.
+- **A dropped player becomes a bot** — clear `car.netPeer` and the existing AI takes over mid-match.
+- **No pausing a shared match.** Host pausing freezes everyone; client pausing desyncs itself.
+- `?localtest=1` enables Trystero's mDNS-to-loopback fallback so two tabs on ONE machine can connect.
+  Dev aid only — real players never need it, and two tabs cannot connect without it.
+
 ## Multiplayer / networking (iter 41+, in progress)
 
 Up to 4 players, all from the same URL, empty seats filled by the existing bots.
