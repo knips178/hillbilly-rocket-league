@@ -705,11 +705,19 @@ STILL TO DO (ideas for future iterations):
       <button class="pick-btn" id="mp-relay-toggle" style="font-size:13px;padding:8px 14px">📡 RELAY SETUP (for folks on cell data)</button>
     </div>
     <div id="mp-turn" style="display:none;margin-top:10px">
-      <input id="turn-url" placeholder="turn:na.relay.metered.ca:80" style="width:100%;max-width:420px;padding:8px;border-radius:6px;border:2px solid #5a3f22;background:rgba(0,0,0,.4);color:#f2e2c4;font-size:13px">
-      <div class="btn-row" style="margin-top:6px">
-        <input id="turn-user" placeholder="username" style="flex:1;min-width:110px;max-width:190px;padding:8px;border-radius:6px;border:2px solid #5a3f22;background:rgba(0,0,0,.4);color:#f2e2c4;font-size:13px">
-        <input id="turn-cred" placeholder="password" type="password" style="flex:1;min-width:110px;max-width:190px;padding:8px;border-radius:6px;border:2px solid #5a3f22;background:rgba(0,0,0,.4);color:#f2e2c4;font-size:13px">
-        <button class="pick-btn" id="turn-test" style="font-size:13px;padding:8px 14px">🧪 TEST</button>
+      <!-- Once saved the values are never rendered again -- only a masked summary. -->
+      <div id="turn-saved" style="display:none;padding:10px 14px;border:2px solid #4a7a3f;border-radius:8px;background:rgba(60,120,60,0.14);font-size:13px;color:#bfe8b8"></div>
+      <div id="turn-fields">
+        <input id="turn-url" placeholder="turn:na.relay.metered.ca:80" autocomplete="off" style="width:100%;max-width:420px;padding:8px;border-radius:6px;border:2px solid #5a3f22;background:rgba(0,0,0,.4);color:#f2e2c4;font-size:13px">
+        <div class="btn-row" style="margin-top:6px">
+          <input id="turn-user" placeholder="username" autocomplete="off" style="flex:1;min-width:110px;max-width:190px;padding:8px;border-radius:6px;border:2px solid #5a3f22;background:rgba(0,0,0,.4);color:#f2e2c4;font-size:13px">
+          <input id="turn-cred" placeholder="password" type="password" autocomplete="new-password" style="flex:1;min-width:110px;max-width:190px;padding:8px;border-radius:6px;border:2px solid #5a3f22;background:rgba(0,0,0,.4);color:#f2e2c4;font-size:13px">
+        </div>
+      </div>
+      <div class="btn-row" style="margin-top:8px">
+        <button class="pick-btn" id="turn-test" style="font-size:13px;padding:8px 14px">🧪 TEST &amp; SAVE</button>
+        <button class="pick-btn" id="turn-change" style="font-size:13px;padding:8px 14px">✏️ CHANGE</button>
+        <button class="pick-btn" id="turn-forget" style="font-size:13px;padding:8px 14px">🗑️ FORGET</button>
       </div>
       <div id="turn-note" style="margin-top:6px;font-size:12px;color:#c9a15f;font-style:italic"></div>
     </div>
@@ -9114,30 +9122,122 @@ document.getElementById('start-btn').onclick = ()=>startMatch(false);
 // either side offers a relay candidate (confirmed in testing: ice route came
 // back "relay / srflx", the guest having no TURN configured at all).
 const LS = (()=>{ try{ return (typeof localStorage!=='undefined') ? localStorage : null; }catch(e){ return null; } })();
-function loadTurn(){
-  if(!LS) return;
-  const u = LS.getItem('hrl-turn-url')||'', n = LS.getItem('hrl-turn-user')||'', c = LS.getItem('hrl-turn-cred')||'';
-  const eu=document.getElementById('turn-url'), en=document.getElementById('turn-user'), ec=document.getElementById('turn-cred');
-  if(eu) eu.value=u; if(en) en.value=n; if(ec) ec.value=c;
-  NET.turn = u ? { urls:u, username:n, credential:c } : null;
-  const note = document.getElementById('turn-note');
-  if(note) note.textContent = u ? '✅ Relay saved on this machine. Guests don\'t need it.'
-                                : 'Optional. Only the host needs this.';
+
+// Relay credentials at rest.
+//
+// Honest about the limit: a browser cannot keep a secret from its own page.
+// WebRTC needs the real password at connect time, so any script running here
+// can read it. What this DOES buy:
+//   - the key is a non-extractable WebCrypto key in IndexedDB: it can be USED
+//     but never exported, copied out, or carried to another machine;
+//   - localStorage holds ciphertext, so dumping storage (or a glance at
+//     devtools) shows nothing usable;
+//   - values are never redisplayed once saved, never leave this machine, and
+//     never enter the repo. Guests don't need them at all.
+// It is not protection against code running on this page. Nothing client-side is.
+const SEC_DB = 'hrl-sec', SEC_KEY = 'relay-key', SEC_BLOB = 'hrl-turn-enc';
+const CRYPTO_OK = (()=>{ try{
+  return typeof indexedDB !== 'undefined' && typeof crypto !== 'undefined'
+      && crypto.subtle && typeof TextEncoder !== 'undefined';
+}catch(e){ return false; } })();
+
+function idbKey(write){
+  return new Promise((res, rej)=>{
+    const open = indexedDB.open(SEC_DB, 1);
+    open.onupgradeneeded = ()=> open.result.createObjectStore('k');
+    open.onerror = ()=> rej(open.error);
+    open.onsuccess = ()=>{
+      const db = open.result;
+      const tx = db.transaction('k', write ? 'readwrite' : 'readonly');
+      const st = tx.objectStore('k');
+      if(write){ st.put(write, SEC_KEY); tx.oncomplete = ()=>{ db.close(); res(write); }; }
+      else { const g = st.get(SEC_KEY);
+             g.onsuccess = ()=>{ db.close(); res(g.result || null); };
+             g.onerror = ()=>{ db.close(); rej(g.error); }; }
+    };
+  });
 }
-function saveTurn(){
+async function relayKey(){
+  let k = await idbKey(null);
+  if(k) return k;
+  // extractable:false -- the key can be used but never read back out
+  k = await crypto.subtle.generateKey({name:'AES-GCM', length:256}, false, ['encrypt','decrypt']);
+  await idbKey(k);
+  return k;
+}
+async function secStore(obj){
+  if(!CRYPTO_OK || !LS) return false;
+  try{
+    const k = await relayKey();
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = await crypto.subtle.encrypt({name:'AES-GCM', iv}, k,
+                new TextEncoder().encode(JSON.stringify(obj)));
+    LS.setItem(SEC_BLOB, JSON.stringify({ iv:Array.from(iv), ct:Array.from(new Uint8Array(ct)) }));
+    return true;
+  }catch(e){ return false; }
+}
+async function secLoad(){
+  if(!CRYPTO_OK || !LS) return null;
+  const raw = LS.getItem(SEC_BLOB); if(!raw) return null;
+  try{
+    const { iv, ct } = JSON.parse(raw);
+    const k = await relayKey();
+    const pt = await crypto.subtle.decrypt({name:'AES-GCM', iv:new Uint8Array(iv)}, k, new Uint8Array(ct));
+    return JSON.parse(new TextDecoder().decode(pt));
+  }catch(e){ return null; }               // wrong key or corrupt -> treat as unset
+}
+
+function relayUI(){
+  const saved = !!(NET.turn && NET.turn.urls);
+  const show = saved && !NET._editRelay;
+  const fields = document.getElementById('turn-fields');
+  const done   = document.getElementById('turn-saved');
+  if(fields) fields.style.display = show ? 'none' : 'block';
+  if(done){
+    done.style.display = show ? 'block' : 'none';
+    if(saved) done.innerHTML = '✅ <b>Relay saved &amp; encrypted</b><br><span style="opacity:.8">'
+      + String(NET.turn.urls).replace(/^turns?:/,'').split(':')[0]
+      + ' · user ••••• · pass •••••</span>';
+  }
+  const note = document.getElementById('turn-note');
+  if(note && !NET._noteBusy) note.textContent = saved
+    ? "Stored encrypted on this machine. Ya won't have to enter it again."
+    : "Optional — only needed so folks on other networks can join.";
+}
+
+async function loadTurn(){
+  let t = await secLoad();
+  if(!t && LS && LS.getItem('hrl-turn-url')){        // migrate the old plaintext copy, then wipe it
+    t = { urls: LS.getItem('hrl-turn-url')||'', username: LS.getItem('hrl-turn-user')||'',
+          credential: LS.getItem('hrl-turn-cred')||'' };
+    if(t.urls) await secStore(t);
+  }
+  if(LS){ LS.removeItem('hrl-turn-url'); LS.removeItem('hrl-turn-user'); LS.removeItem('hrl-turn-cred'); }
+  NET.turn = (t && t.urls) ? t : null;
+  relayUI();
+}
+async function saveTurn(){
   const u=(document.getElementById('turn-url').value||'').trim();
   const n=(document.getElementById('turn-user').value||'').trim();
   const c=(document.getElementById('turn-cred').value||'').trim();
-  if(LS){ LS.setItem('hrl-turn-url',u); LS.setItem('hrl-turn-user',n); LS.setItem('hrl-turn-cred',c); }
   NET.turn = u ? { urls:u, username:n, credential:c } : null;
-  const note=document.getElementById('turn-note');
-  if(note) note.textContent = u ? '✅ Relay saved on this machine. Guests don\'t need it.'
-                                : 'Optional. Only the host needs this.';
+  if(u) await secStore(NET.turn); else if(LS) LS.removeItem(SEC_BLOB);
 }
-['turn-url','turn-user','turn-cred'].forEach(id=>{
-  const el=document.getElementById(id); if(el) el.oninput = saveTurn;
-});
+function forgetTurn(){
+  NET.turn = null; NET._editRelay = false;
+  if(LS){ LS.removeItem(SEC_BLOB); }
+  ['turn-url','turn-user','turn-cred'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.value='';
+  });
+  relayUI();
+}
 loadTurn();
+
+document.getElementById('turn-change').onclick = ()=>{ NET._editRelay = true; relayUI(); };
+document.getElementById('turn-forget').onclick = ()=>{
+  forgetTurn();
+  const n=document.getElementById('turn-note'); if(n) n.textContent = 'Forgot it. Nothin\' stored.';
+};
 
 document.getElementById('mp-relay-toggle').onclick = ()=>{
   const b=document.getElementById('mp-turn');
@@ -9173,9 +9273,18 @@ NET.testTurn = function(note){
     }
   }, 8000);
 };
-document.getElementById('turn-test').onclick = ()=>{
-  saveTurn();
-  NET.testTurn(m=>{ const n=document.getElementById('turn-note'); if(n) n.textContent = m; });
+document.getElementById('turn-test').onclick = async ()=>{
+  await saveTurn();
+  NET._noteBusy = true;
+  NET.testTurn(m=>{
+    const n=document.getElementById('turn-note'); if(n) n.textContent = m;
+    if(m.indexOf('✅') === 0){                      // only lock it away once it's proven
+      NET._noteBusy = false; NET._editRelay = false; relayUI();
+      if(n) n.textContent = m + " Saved encrypted — ya won't need to type it again.";
+    } else if(m.indexOf('❌') === 0 || m.indexOf('⚠️') === 0){
+      NET._noteBusy = false;
+    }
+  });
 };
 
 function mpTip(msg){ const t=document.getElementById('mp-tip'); if(t) t.textContent = msg; }
