@@ -105,8 +105,9 @@ function frame(){ const fn=rafQueue.shift(); if(fn) fn(); while(pendingTimeouts.
 function runFrames(n){ for(let f=0; f<n && game.state!=='end'; f++) frame(); }
 function press(i){ fakePad.buttons[i].pressed=true; frame(); fakePad.buttons[i].pressed=false; frame(); }
 
-// controller menu-nav test (in lobby) — 6 rows now (team, ride, size, length, arena, start)
-press(13); press(13); press(13); press(13); press(13);
+// controller menu-nav test (in lobby) — 7 rows now
+// (team, ride, size, length, arena, multiplayer, start) — 6 downs to reach START
+press(13); press(13); press(13); press(13); press(13); press(13);
 press(0);
 console.log('controller menu start test — state:', game.state, '(expect countdown)');
 if(game.state!=='countdown') throw new Error('controller menu start failed');
@@ -247,7 +248,18 @@ if(NET.slots.filter(s=>s.type==='open').length !== 2) throw new Error('leftover 
 const freed = NET.freePeer('q0');
 if(!freed || freed.type !== 'open') throw new Error('leaving peer did not free its seat');
 if(NET.humanCount() !== 3) throw new Error('human count should drop to 3');
-NET.slots = [];
-console.log('multiplayer seat table OK');
+// Starting a hosted match converts every open seat to a bot and spawns a full
+// grid -- this is the "fill empty player slots with an NPC" requirement.
+NET.role = 'host';
+NET.slots = NET.buildSlots(2);
+NET.seatPeer('host-self','HOST',0,0);
+game.state = 'lobby';
+NET.beginMatch();
+if(NET.slots.filter(s=>s.type==='open').length !== 0) throw new Error('open seats survived match start');
+if(NET.slots.filter(s=>s.type==='bot').length !== 3) throw new Error('expected 3 bots, got '+NET.slots.filter(s=>s.type==='bot').length);
+if(cars.length !== 4) throw new Error('expected 4 cars, got '+cars.length);
+if(game.state !== 'countdown') throw new Error('hosted match did not start');
+NET.role = 'solo'; NET.slots = [];
+console.log('multiplayer seat table OK — bot-fill spawns a full grid');
 
 console.log('ALL TESTS PASSED');

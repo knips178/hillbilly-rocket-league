@@ -443,6 +443,33 @@ STILL TO DO (ideas for future iterations):
   html,body { width:100%; height:100%; overflow:hidden; background:#1a1208; font-family:'Trebuchet MS', 'Arial Black', sans-serif; }
   #game-canvas { position:absolute; top:0; left:0; }
 
+  /* ---------- WAITIN' ROOM (multiplayer) ---------- */
+  #waitroom {
+    position:absolute; inset:0; z-index:24; overflow-y:auto; display:none;
+    background: linear-gradient(180deg, rgba(14,9,4,0.94) 0%, rgba(14,9,4,0.82) 40%, rgba(14,9,4,0.96) 100%);
+    color:#f2e2c4; padding:24px 16px 60px;
+  }
+  #waitroom .lobby-inner { max-width:720px; }
+  .code-box {
+    display:inline-block; margin:6px auto 2px; padding:10px 26px; border-radius:12px;
+    background:rgba(0,0,0,.45); border:3px dashed #ffb347;
+    font-size:min(15vw,64px); letter-spacing:12px; font-weight:bold; color:#fff3c9;
+    text-shadow:0 3px 0 #6b2b0e, 0 8px 16px rgba(0,0,0,.7);
+  }
+  .seat {
+    display:flex; align-items:center; gap:12px; text-align:left;
+    padding:10px 14px; margin:7px 0; border-radius:9px; border:2px solid #5a3f22;
+    background:rgba(0,0,0,.35); font-size:16px;
+  }
+  .seat.blue { border-left:8px solid #4fa3ff; }
+  .seat.red  { border-left:8px solid #ff6a4f; }
+  .seat .who { flex:1; font-weight:bold; }
+  .seat .tagx { font-size:12px; letter-spacing:2px; text-transform:uppercase; opacity:.75; }
+  .seat.open  { opacity:.62; font-style:italic; }
+  .seat.me .who { color:#ffd23e; }
+  #wr-status { margin:14px 0 4px; font-size:17px; color:#ffd23e; min-height:24px; font-weight:bold; }
+  #wr-sub { font-size:13px; color:#c9a15f; font-style:italic; min-height:18px; }
+
   /* ---------- LOBBY ---------- */
   #lobby {
     position:absolute; inset:0; z-index:20; overflow-y:auto;
@@ -658,10 +685,54 @@ STILL TO DO (ideas for future iterations):
     </div>
     <div id="arena-tip" style="margin-top:6px;font-size:13px;color:#c9a15f;font-style:italic;min-height:18px"></div>
 
+    <div class="section">Play with folks</div>
+    <div class="btn-row" id="mp-row">
+      <button class="pick-btn" id="mp-host">🎪 HOST A GAME</button>
+      <button class="pick-btn" id="mp-join">🔗 JOIN A GAME</button>
+    </div>
+    <div id="mp-tip" style="margin-top:6px;font-size:13px;color:#c9a15f;font-style:italic;min-height:18px">Up to 4 folks. Empty seats get filled with bots.</div>
+
     <button id="start-btn">🏁 GIT 'ER DONE</button>
     <div id="pad-blocked" style="display:none;margin-top:14px;padding:10px 14px;border:2px solid #c9702b;border-radius:8px;background:rgba(201,112,43,0.14);color:#f2c078;font-size:13px;line-height:1.4">🎮 <b>Heads up:</b> this embedded view blocks game controllers, so yer PS5 pad won't work here — that's the preview window, not the game. <b>Keyboard works fine.</b> To use the controller, download this page (⋯ menu → save) and open the file in yer browser directly.</div>
     <div id="lobby-tip" style="margin-top:18px;font-size:13px;color:#c9a15f;font-style:italic;min-height:20px"></div>
     <div class="warn">⌨️ W/S drive · A/D steer · SPACE jump (twice = flip) · SHIFT boost · C ball-cam · ESC pause · M mute · V announcer<br>🎮 PS5 controller: R2 gas · L2 reverse · stick steer · ✕ jump · ◯/R1 boost · △ ball-cam · OPTIONS start/pause<br>🎮 This whole menu works with the controller too: D-pad or stick to move, ✕ to pick, OPTIONS to start. Keyboard: arrows/WASD + ENTER.<br>(Pair the controller and press any button so the browser detects it.) Solo demo — yer teammates &amp; rivals are bots. Watch yer ass: supersonic hits DEMOLISH folks now.<br><br><small style="opacity:.75">CREDITS — Cow &amp; farmer models: <b>Quaternius</b> (CC0). Announcer voice: <b>Kenney</b> Voiceover Pack (CC0), kenney.nl. Sounds via Wikimedia Commons: goal shout by <b>Frogfriend99</b> (CC BY-SA 3.0), vuvuzela by <b>DisillusionedBitterAndKnackered</b> (CC BY-SA 3.0), referee whistle by <b>SpliceSound</b> (CC0), moo by <b>MichaeltheFox8621</b> (CC BY-SA 4.0), crowd by <b>WebbFilmsUK</b> (CC BY 4.0), sad trombone by <b>Sad Tromboner</b> (CC BY 4.0), train horn by <b>WeenyBeany</b> (CC BY 4.0). 3D engine: three.js (MIT).</small></div>
+  </div>
+</div>
+
+<div id="waitroom">
+  <div class="lobby-inner">
+    <h1 class="title" style="font-size:min(6vw,40px)">THE WAITIN' ROOM</h1>
+    <div class="subtitle" id="wr-role">Hollerin' at the neighbors…</div>
+
+    <div class="section">Room code — tell yer people</div>
+    <div class="code-box" id="wr-code">----</div>
+    <div class="btn-row" style="margin-top:10px">
+      <button class="pick-btn" id="wr-copy">📋 COPY INVITE LINK</button>
+    </div>
+
+    <div class="section">Who's here</div>
+    <div id="wr-seats"></div>
+
+    <div id="wr-status"></div>
+    <div id="wr-sub"></div>
+
+    <div class="btn-row" style="margin-top:16px">
+      <button class="pick-btn" id="wr-start">🏁 START NOW (bots fill the rest)</button>
+      <button class="pick-btn" id="wr-leave">🚪 BACK OUT</button>
+    </div>
+
+    <!-- Host-only relay settings. Kept in this browser (localStorage), never in the
+         page source: only ONE side of a pair needs TURN, so the host carrying it is
+         enough for everybody else to connect. -->
+    <div id="wr-turn" style="margin-top:22px">
+      <div class="section" style="font-size:12px">Relay (only if folks can't connect)</div>
+      <input id="turn-url" placeholder="turn:na.relay.metered.ca:80" style="width:100%;max-width:420px;padding:8px;border-radius:6px;border:2px solid #5a3f22;background:rgba(0,0,0,.4);color:#f2e2c4;font-size:13px">
+      <div class="btn-row" style="margin-top:6px">
+        <input id="turn-user" placeholder="username" style="flex:1;min-width:120px;max-width:200px;padding:8px;border-radius:6px;border:2px solid #5a3f22;background:rgba(0,0,0,.4);color:#f2e2c4;font-size:13px">
+        <input id="turn-cred" placeholder="password" type="password" style="flex:1;min-width:120px;max-width:200px;padding:8px;border-radius:6px;border:2px solid #5a3f22;background:rgba(0,0,0,.4);color:#f2e2c4;font-size:13px">
+      </div>
+      <div id="turn-note" style="margin-top:6px;font-size:12px;color:#c9a15f;font-style:italic"></div>
+    </div>
   </div>
 </div>
 
@@ -7547,6 +7618,7 @@ function chatMsg(who, team, text){
 const menuNav = { rows: [], r:0, c:0 };
 function navContext(){
   if(document.getElementById('overlay-screen').style.display==='flex') return 'overlay';
+  if(document.getElementById('waitroom').style.display==='block') return 'waitroom';
   if(game.state==='lobby') return 'lobby';
   return null;
 }
@@ -7562,7 +7634,14 @@ function refreshNav(){
       Array.from(document.querySelectorAll('#size-row .pick-btn')),
       Array.from(document.querySelectorAll('#len-row .pick-btn')),
       Array.from(document.querySelectorAll('#arena-row .pick-btn')),
+      Array.from(document.querySelectorAll('#mp-row .pick-btn')),
       [document.getElementById('start-btn')],
+    ];
+  } else if(ctx==='waitroom'){
+    menuNav.rows = [
+      [document.getElementById('wr-copy')],
+      Array.from(document.querySelectorAll('#waitroom .btn-row .pick-btn'))
+        .filter(b=>b.id!=='wr-copy' && b.style.display!=='none'),
     ];
   } else { menuNav.rows = []; return; }
   menuNav.r = Math.min(menuNav.r, menuNav.rows.length-1);
@@ -8519,6 +8598,129 @@ NET.leave = function(){
 
 NET.fire = function(){ if(typeof NET.onchange === 'function') try{ NET.onchange(); }catch(e){} };
 
+// ---- waitin' room ----------------------------------------------------------
+// Host owns the seat table and the settings; clients render whatever it sends.
+// Auto-start exists so an AFK host can't hold everybody hostage: once a second
+// human turns up a 30s clock runs, resetting on each new arrival so a group can
+// gather, and collapsing to 5s once the room is full.
+const WR_FULL_WAIT = 30, WR_FULL_RUSH = 5;
+NET.startAt = 0;                 // ms timestamp, 0 = not counting
+NET.settings = null;             // client-side mirror of the host's lobby settings
+
+function wrEl(id){ return document.getElementById(id); }
+function myName(){ return (wrEl('player-name').value.trim() || 'Billy Bob').slice(0,16); }
+
+NET.pushLobby = function(){
+  if(NET.role !== 'host' || !NET.act.lobby) return;
+  NET.act.lobby.send({
+    slots: NET.slots.map(s=>({team:s.team,type:s.type,name:s.name,veh:s.veh,peerId:s.peerId})),
+    startAt: NET.startAt ? NET.startAt - Date.now() : 0,      // send as a delta; clocks differ
+    set: { size:lobby.size, len:lobby.len, arena:lobby.arena },
+  });
+};
+
+NET.armAutoStart = function(){
+  if(NET.role !== 'host') return;
+  const humans = NET.humanCount();
+  if(humans < 2){ NET.startAt = 0; return; }
+  const secs = humans >= MAX_HUMANS ? WR_FULL_RUSH : WR_FULL_WAIT;
+  NET.startAt = Date.now() + secs*1000;
+};
+
+function renderWaitroom(){
+  if(!wrEl('waitroom') || wrEl('waitroom').style.display === 'none') return;
+  wrEl('wr-code').textContent = NET.code || '----';
+  wrEl('wr-role').textContent = NET.role === 'host'
+    ? "Yer the host — yer machine runs the game."
+    : "Yer connected. Waitin' on the host to start.";
+  wrEl('wr-start').style.display = NET.role === 'host' ? '' : 'none';
+
+  const seats = NET.role === 'host' ? NET.slots : (NET.settings ? NET.settings.slots : []);
+  const box = wrEl('wr-seats');
+  box.innerHTML = (seats||[]).map(s=>{
+    const mine = s.peerId === NET.selfId;
+    const who = s.type === 'human' ? (s.name || 'HOSS') : (s.type === 'bot' ? 'BOT' : 'OPEN SEAT');
+    const tag = s.type === 'human' ? (mine ? 'YOU' : 'READY') : 'gets a bot';
+    return '<div class="seat '+(s.team===0?'blue':'red')+(s.type!=='human'?' open':'')+(mine?' me':'')+'">'
+         + '<span class="who">'+who+'</span><span class="tagx">'+tag+'</span></div>';
+  }).join('') || '<div class="seat open"><span class="who">…</span></div>';
+
+  const humans = (seats||[]).filter(s=>s.type==='human').length;
+  const left = NET.startAt ? Math.max(0, Math.ceil((NET.startAt - Date.now())/1000)) : 0;
+  if(NET.err){ wrEl('wr-status').textContent = '⚠️ ' + NET.err; wrEl('wr-sub').textContent = ''; return; }
+  if(left > 0){
+    wrEl('wr-status').textContent = "KICKOFF IN " + left + "s";
+    wrEl('wr-sub').textContent = "Startin' with whoever's here — empty seats get bots.";
+  } else if(humans < 2){
+    wrEl('wr-status').textContent = "Waitin' on somebody else to show up…";
+    wrEl('wr-sub').textContent = NET.role === 'host'
+      ? "Or just hit START NOW and play the bots." : "Sit tight.";
+  } else {
+    wrEl('wr-status').textContent = humans + " folks in the holler";
+    wrEl('wr-sub').textContent = '';
+  }
+}
+NET.onchange = renderWaitroom;
+
+function showWaitroom(on){
+  wrEl('waitroom').style.display = on ? 'block' : 'none';
+  wrEl('lobby').style.display = on ? 'none' : 'block';
+  if(on) renderWaitroom();
+  refreshNav();
+}
+
+NET.hostGame = function(){
+  if(!NET.available()){ alert("Multiplayer ain't available in this here window. Open the real page."); return; }
+  if(!NET.join(NET.makeCode(), true)) { alert("Couldn't start a room: " + NET.err); return; }
+  NET.slots = NET.buildSlots(lobby.size);
+  NET.seatPeer(NET.selfId, myName(), lobby.vehicle, lobby.team);   // host takes a seat
+  // A joiner announces itself; the host seats it and re-broadcasts the table.
+  NET.act.hello.onMessage = (d, ctx)=>{
+    if(NET.role !== 'host') return;
+    if(!NET.slots.find(s=>s.peerId===ctx.peerId)) NET.seatPeer(ctx.peerId, (d&&d.name)||'HOSS', (d&&d.veh)|0, null);
+    NET.armAutoStart(); NET.pushLobby(); renderWaitroom();
+  };
+  showWaitroom(true);
+  NET.pushLobby();
+};
+
+NET.joinGame = function(code){
+  if(!NET.available()){ alert("Multiplayer ain't available in this here window. Open the real page."); return; }
+  if(!NET.join(code, false)) { alert("Couldn't join: " + NET.err); return; }
+  NET.act.lobby.onMessage = d=>{
+    if(NET.role !== 'client' || !d) return;
+    NET.settings = d;
+    NET.startAt = d.startAt ? Date.now() + d.startAt : 0;
+    if(d.set){ lobby.size = d.set.size; lobby.len = d.set.len; lobby.arena = d.set.arena; }
+    renderWaitroom();
+  };
+  showWaitroom(true);
+  // keep announcing until the host acknowledges us with a seat
+  let tries = 0;
+  const hi = setInterval(()=>{
+    if(NET.role !== 'client' || ++tries > 40){ clearInterval(hi); return; }
+    const seated = NET.settings && (NET.settings.slots||[]).some(s=>s.peerId===NET.selfId);
+    if(seated){ clearInterval(hi); return; }
+    try{ NET.act.hello.send({ name: myName(), veh: lobby.vehicle }); }catch(e){}
+  }, 900);
+};
+
+NET.quit = function(){ NET.leave(); NET.settings=null; NET.startAt=0; showWaitroom(false); };
+
+// host-side tick: fire the auto-start clock
+NET.tickWaitroom = function(){
+  if(NET.role !== 'host' || !NET.startAt) return;
+  if(Date.now() >= NET.startAt){ NET.startAt = 0; NET.beginMatch(); }
+};
+NET.beginMatch = function(){
+  if(NET.role === 'host'){
+    for(const s of NET.slots) if(s.type === 'open') s.type = 'bot';   // <- the bot-fill
+    NET.pushLobby();
+  }
+  showWaitroom(false);
+  startMatch(false);
+};
+
 // ---------------- MATCH SETUP ----------------
 function startMatch(rematch){
   // clear old cars
@@ -8560,6 +8762,60 @@ function startMatch(rematch){
   refreshNav();
 }
 document.getElementById('start-btn').onclick = ()=>startMatch(false);
+
+// ---- multiplayer buttons ----
+// TURN credentials live in THIS browser only (localStorage), never in the page
+// source -- the repo is public, and anything shipped in the HTML is extractable
+// by anyone who loads the game. Only the host needs them: a pair connects if
+// either side offers a relay candidate (confirmed in testing: ice route came
+// back "relay / srflx", the guest having no TURN configured at all).
+const LS = (()=>{ try{ return (typeof localStorage!=='undefined') ? localStorage : null; }catch(e){ return null; } })();
+function loadTurn(){
+  if(!LS) return;
+  const u = LS.getItem('hrl-turn-url')||'', n = LS.getItem('hrl-turn-user')||'', c = LS.getItem('hrl-turn-cred')||'';
+  const eu=document.getElementById('turn-url'), en=document.getElementById('turn-user'), ec=document.getElementById('turn-cred');
+  if(eu) eu.value=u; if(en) en.value=n; if(ec) ec.value=c;
+  NET.turn = u ? { urls:u, username:n, credential:c } : null;
+  const note = document.getElementById('turn-note');
+  if(note) note.textContent = u ? '✅ Relay saved on this machine. Guests don\'t need it.'
+                                : 'Optional. Only the host needs this.';
+}
+function saveTurn(){
+  const u=(document.getElementById('turn-url').value||'').trim();
+  const n=(document.getElementById('turn-user').value||'').trim();
+  const c=(document.getElementById('turn-cred').value||'').trim();
+  if(LS){ LS.setItem('hrl-turn-url',u); LS.setItem('hrl-turn-user',n); LS.setItem('hrl-turn-cred',c); }
+  NET.turn = u ? { urls:u, username:n, credential:c } : null;
+  const note=document.getElementById('turn-note');
+  if(note) note.textContent = u ? '✅ Relay saved on this machine. Guests don\'t need it.'
+                                : 'Optional. Only the host needs this.';
+}
+['turn-url','turn-user','turn-cred'].forEach(id=>{
+  const el=document.getElementById(id); if(el) el.oninput = saveTurn;
+});
+loadTurn();
+
+document.getElementById('mp-host').onclick = ()=>{ audio(); NET.hostGame(); };
+document.getElementById('mp-join').onclick = ()=>{
+  audio();
+  const code = (prompt("Room code from yer host (4 letters):")||'').trim().toUpperCase();
+  if(code) NET.joinGame(code);
+};
+document.getElementById('wr-start').onclick = ()=>{ if(NET.role==='host') NET.beginMatch(); };
+document.getElementById('wr-leave').onclick = ()=>NET.quit();
+document.getElementById('wr-copy').onclick = ()=>{
+  const link = location.origin + location.pathname + '?join=' + NET.code;
+  try{ navigator.clipboard.writeText(link); }catch(e){}
+  document.getElementById('wr-copy').textContent = '✅ COPIED — send it to yer people';
+};
+
+// ?join=CODE deep link: skip the lobby dance entirely.
+(function(){
+  try{
+    const j = new URLSearchParams(location.search).get('join');
+    if(j) setTimeout(()=>NET.joinGame(j.toUpperCase()), 300);
+  }catch(e){}
+})();
 
 // ---------------- CAMERA (tuned to real Rocket League specs, scaled) ----------------
 // RL defaults: distance 270uu, height 110uu, angle -3°, stiffness ~0.45, smoothed swivel.
@@ -8692,6 +8948,7 @@ function animate(){
   }
 
   if(game.state!=='play') fxSpeedEl.style.opacity = 0;   // streaks are a full-speed-only thing
+  NET.tickWaitroom();            // host-side auto-start clock
   if(game.state==='lobby'){
     // cinematic menu: slow drone-orbit of the live arena while ya pick — weather, crowd n' all
     const mt = performance.now()/1000;
