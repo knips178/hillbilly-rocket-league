@@ -757,6 +757,12 @@ STILL TO DO (ideas for future iterations):
     </div>
 
     <div id="wr-relay" style="margin-top:18px;font-size:13px;color:#c9a15f;font-style:italic"></div>
+    <div class="btn-row" style="margin-top:10px">
+      <button class="pick-btn" id="wr-diag-btn" style="font-size:13px;padding:8px 14px">🩺 CONNECTION INFO</button>
+    </div>
+    <pre id="wr-diag" style="display:none;text-align:left;max-width:420px;margin:10px auto 0;padding:10px;
+      border:2px solid #4a3f2c;border-radius:8px;background:rgba(0,0,0,.5);color:#b8a888;
+      font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap"></pre>
   </div>
 </div>
 
@@ -8577,6 +8583,60 @@ NET.turn = null;             // { urls, username, credential }
 
 NET.available = ()=> typeof window !== 'undefined' && !!window.TrysteroNostr;
 
+// ---- connection diagnostics -------------------------------------------------
+// "Nobody joined" has half a dozen causes that look identical from the outside.
+// Phase 0 only got solved by measuring, so the same probes live in the game:
+// remoteSDP > 0 proves the two devices FOUND each other (signaling is fine and
+// the failure is the peer link); candidate types show whether a relay was even
+// offered. Wrapped once at load, before any room exists.
+NET.diag = { ws:0, wsOpen:0, remoteSDP:0, remoteCand:0, cand:{}, pcs:{}, iceErr:'' };
+(function instrument(){
+  if(typeof window === 'undefined') return;
+  try{
+    const _WS = window.WebSocket;
+    if(_WS){
+      window.WebSocket = function(u,p){
+        NET.diag.ws++;
+        const w = p===undefined ? new _WS(u) : new _WS(u,p);
+        w.addEventListener('open', ()=>NET.diag.wsOpen++);
+        return w;
+      };
+      window.WebSocket.prototype = _WS.prototype; Object.assign(window.WebSocket, _WS);
+    }
+    const _PC = window.RTCPeerConnection;
+    if(_PC){
+      window.RTCPeerConnection = function(cfg){
+        const pc = new _PC(cfg);
+        const _srd = pc.setRemoteDescription.bind(pc);
+        pc.setRemoteDescription = d=>{ NET.diag.remoteSDP++; return _srd(d); };
+        const _aic = pc.addIceCandidate.bind(pc);
+        pc.addIceCandidate = c=>{ NET.diag.remoteCand++; return _aic(c); };
+        pc.addEventListener('icecandidate', e=>{
+          if(e.candidate && e.candidate.type) NET.diag.cand[e.candidate.type] = 1; });
+        pc.addEventListener('icecandidateerror', e=>{
+          if(e.errorCode >= 400) NET.diag.iceErr = 'ICE ' + e.errorCode; });
+        pc.addEventListener('connectionstatechange', ()=>{
+          NET.diag.pcs[pc.connectionState] = (NET.diag.pcs[pc.connectionState]||0)+1; });
+        return pc;
+      };
+      window.RTCPeerConnection.prototype = _PC.prototype; Object.assign(window.RTCPeerConnection, _PC);
+    }
+  }catch(e){}
+})();
+
+NET.diagText = function(){
+  const d = NET.diag;
+  const cands = Object.keys(d.cand).join(',') || '—';
+  const peers = NET.room ? Object.keys(NET.room.getPeers()).length : 0;
+  return 'role ' + NET.role + '  room ' + (NET.code||'-') +
+    '\nrelays ' + d.wsOpen + '/' + d.ws +
+    '   relay-cred ' + (NET.roomHadTurn ? 'yes' : 'no') +
+    '\nfound-each-other (remoteSDP) ' + d.remoteSDP +
+    '\nmy candidates ' + cands +
+    '\npeers ' + peers + '   states ' + (JSON.stringify(d.pcs)||'{}') +
+    (d.iceErr ? '\n' + d.iceErr : '');
+};
+
 // Room codes: unambiguous alphabet, no O/0/I/1 to survive being read aloud.
 const CODE_ALPHA = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 NET.makeCode = ()=>{
@@ -8725,9 +8785,21 @@ function renderWaitroom(){
     : "Yer connected. Waitin' on the host to start.";
   wrEl('wr-start').style.display = NET.role === 'host' ? '' : 'none';
   const rel = wrEl('wr-relay');
-  if(rel) rel.textContent = NET.roomHadTurn
-    ? '📡 Relay ON — folks on cell data can get in.'
-    : '📡 No relay — only folks on yer own wifi can join. Set one up in the lobby.';
+  if(rel){
+    if(NET.role === 'client'){
+      // A guest carrying no relay is normal and fine: only one side of a pair
+      // needs one. Saying "No relay" here just alarms people.
+      rel.textContent = NET.roomHadTurn
+        ? "📡 Yer usin' a relay."
+        : "📡 Relayin' through the host — nothin' for you to set up.";
+    } else {
+      rel.textContent = NET.roomHadTurn
+        ? '📡 Relay ON — folks on cell data can get in.'
+        : '📡 No relay — only folks on yer own wifi can join. Set one up in the lobby.';
+    }
+  }
+  const dg = wrEl('wr-diag');
+  if(dg && dg.style.display === 'block') dg.textContent = NET.diagText();
 
   const seats = NET.role === 'host' ? NET.slots : (NET.settings ? NET.settings.slots : []);
   const box = wrEl('wr-seats');
@@ -9332,6 +9404,11 @@ document.getElementById('wr-name').oninput = ()=>{
 };
 document.getElementById('wr-start').onclick = ()=>{ if(NET.role==='host') NET.beginMatch(); };
 document.getElementById('wr-leave').onclick = ()=>NET.quit();
+document.getElementById('wr-diag-btn').onclick = ()=>{
+  const d=document.getElementById('wr-diag');
+  d.style.display = d.style.display === 'block' ? 'none' : 'block';
+  if(d.style.display === 'block') d.textContent = NET.diagText();
+};
 document.getElementById('wr-copy').onclick = ()=>{
   const link = location.origin + location.pathname + '?join=' + NET.code;
   try{ navigator.clipboard.writeText(link); }catch(e){}
