@@ -9274,7 +9274,14 @@ NET.testTurn = function(note){
   }, 8000);
 };
 document.getElementById('turn-test').onclick = async ()=>{
-  await saveTurn();
+  // Once saved, the fields are hidden and empty. Saving from them here would
+  // blank a perfectly good relay -- so only take what's typed when the user is
+  // actually editing, otherwise just re-test what's already stored.
+  const editing = document.getElementById('turn-fields').style.display !== 'none';
+  const typed = (document.getElementById('turn-url').value || '').trim();
+  const note = m=>{ const n=document.getElementById('turn-note'); if(n) n.textContent = m; };
+  if(editing && typed) await saveTurn();
+  else if(!NET.turn || !NET.turn.urls){ note("Nothin' entered yet — hit CHANGE and fill it in."); return; }
   NET._noteBusy = true;
   NET.testTurn(m=>{
     const n=document.getElementById('turn-note'); if(n) n.textContent = m;
