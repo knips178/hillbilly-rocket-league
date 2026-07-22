@@ -97,8 +97,8 @@ Object.defineProperty(global, 'navigator', { value: { getGamepads: ()=>[fakePad]
 // ---- load game ----
 const fs=require('fs');
 const src=fs.readFileSync('/tmp/game.js','utf8');
-eval(src + '\n;global.__G={startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,NET};');
-const {startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,NET} = global.__G;
+eval(src + '\n;global.__G={startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,NET,updateCar,botInput,presentGoal,togglePause};');
+const {startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,NET,updateCar,botInput,presentGoal,togglePause} = global.__G;
 
 // ---- simulate ----
 function frame(){ const fn=rafQueue.shift(); if(fn) fn(); while(pendingTimeouts.length) pendingTimeouts.shift()(); }
@@ -259,7 +259,62 @@ if(NET.slots.filter(s=>s.type==='open').length !== 0) throw new Error('open seat
 if(NET.slots.filter(s=>s.type==='bot').length !== 3) throw new Error('expected 3 bots, got '+NET.slots.filter(s=>s.type==='bot').length);
 if(cars.length !== 4) throw new Error('expected 4 cars, got '+cars.length);
 if(game.state !== 'countdown') throw new Error('hosted match did not start');
-NET.role = 'solo'; NET.slots = [];
+// Roster must be identical and ordered, or snapshot indices address the wrong cars.
+NET.role = 'host';
+NET.slots = NET.buildSlots(2);
+NET.seatPeer('host-self','HOST',0,0);
+NET.seatPeer('guest-1','GUEST',0,1);
+for(const s of NET.slots) if(s.type==='open') s.type='bot';
+const roster = NET.buildRoster();
+if(roster.length !== 4) throw new Error('roster should cover every seat');
+if(roster.filter(r=>r.type==='human').length !== 2) throw new Error('roster lost a human');
+if(roster.some(r=>!r.name)) throw new Error('roster left a car unnamed');
+if(roster.map(r=>r.team).join('') !== NET.slots.map(s=>s.team).join(''))
+  throw new Error('roster order diverged from seat order');
+
+// Building cars from a roster: the local peer drives, other humans are remote,
+// and the rest fall through to the bot AI.
+NET.selfId = 'host-self'; NET.roster = roster;
+game.state='lobby'; startMatch(false);
+if(cars.length !== 4) throw new Error('roster should spawn 4 cars');
+if(!game.player || game.player.name !== 'HOST') throw new Error('local car not bound to this peer');
+const remote = cars.filter(c=>c.netPeer);
+if(remote.length !== 1 || remote[0].name !== 'GUEST') throw new Error('remote human car not tagged');
+if(cars.filter(c=>!c.isPlayer && !c.netPeer).length !== 2) throw new Error('expected 2 bot-driven cars');
+
+// A remote player's controls must drive their car exactly like bot input would.
+NET.inputs['guest-1'] = { th:1, st:0, b:0, j:0, sp:0 };
+const rin = NET.remoteInput('guest-1');
+if(rin.throttle !== 1) throw new Error('remote input not resolved');
+const rc = remote[0]; rc.pos.set(0,0,0); rc.vel.set(0,0,0); rc.yaw=0;
+for(let i=0;i<60;i++) updateCar(rc, 1/60, NET.remoteInput('guest-1'));
+if(Math.hypot(rc.vel.x, rc.vel.z) < 5) throw new Error('remote input did not move the car');
+// unknown peer must not throw
+if(NET.remoteInput('nobody').throttle !== 0) throw new Error('unknown peer should idle');
+
+// Dropping out hands the car to the AI mid-match, with no respawn.
+rc.netPeer = null;
+if(cars.filter(c=>c.netPeer).length !== 0) throw new Error('dropped peer still owns a car');
+const rin2 = botInput(rc, 1/60);
+if(typeof rin2.throttle !== 'number') throw new Error('abandoned car did not fall back to bot AI');
+
+// Goal presentation must work without a host (this is the client's path).
+NET.role = 'client';
+game.score=[0,0]; game.state='play';
+presentGoal({ team:1, pts:2, tag:'HOWITZER', scorerName:'GUEST', scorerTeam:1 });
+if(game.score[1] !== 2) throw new Error('client did not apply goal points');
+if(game.state !== 'goal') throw new Error('client did not enter goal state');
+
+// No pausing a shared match.
+NET.role='host'; game.paused=false; game.state='play';
+togglePause();
+if(game.paused) throw new Error('multiplayer match should not be pausable');
+NET.role='solo'; togglePause();
+if(!game.paused) throw new Error('solo pause broke');
+togglePause();
+
+NET.role = 'solo'; NET.slots = []; NET.roster = null; NET.inputs = {};
 console.log('multiplayer seat table OK — bot-fill spawns a full grid');
+console.log('netcode OK — roster order, remote input, drop-to-bot, goal replication');
 
 console.log('ALL TESTS PASSED');

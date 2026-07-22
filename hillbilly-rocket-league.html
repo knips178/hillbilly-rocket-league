@@ -685,14 +685,19 @@ STILL TO DO (ideas for future iterations):
     </div>
     <div id="arena-tip" style="margin-top:6px;font-size:13px;color:#c9a15f;font-style:italic;min-height:18px"></div>
 
-    <div class="section">Play with folks</div>
+    <div class="section">Play with folks (up to 4)</div>
     <div class="btn-row" id="mp-row">
       <button class="pick-btn" id="mp-host">🎪 HOST A GAME</button>
       <button class="pick-btn" id="mp-join">🔗 JOIN A GAME</button>
     </div>
-    <div id="mp-tip" style="margin-top:6px;font-size:13px;color:#c9a15f;font-style:italic;min-height:18px">Up to 4 folks. Empty seats get filled with bots.</div>
+    <div class="btn-row" id="mp-joinbox" style="display:none;margin-top:10px">
+      <input id="mp-code" maxlength="4" placeholder="CODE" autocapitalize="characters" autocomplete="off" spellcheck="false"
+             style="width:150px;padding:10px;border-radius:7px;border:2px solid #5a3f22;background:rgba(0,0,0,.4);color:#f2e2c4;font-size:22px;font-weight:bold;letter-spacing:6px;text-align:center;text-transform:uppercase">
+      <button class="pick-btn" id="mp-go">➡️ GET IN THERE</button>
+    </div>
+    <div id="mp-tip" style="margin-top:6px;font-size:13px;color:#c9a15f;font-style:italic;min-height:18px">Anybody with the code can join from any browser — nothin' to install.</div>
 
-    <button id="start-btn">🏁 GIT 'ER DONE</button>
+    <button id="start-btn">🏁 PLAY SOLO (VS BOTS)</button>
     <div id="pad-blocked" style="display:none;margin-top:14px;padding:10px 14px;border:2px solid #c9702b;border-radius:8px;background:rgba(201,112,43,0.14);color:#f2c078;font-size:13px;line-height:1.4">🎮 <b>Heads up:</b> this embedded view blocks game controllers, so yer PS5 pad won't work here — that's the preview window, not the game. <b>Keyboard works fine.</b> To use the controller, download this page (⋯ menu → save) and open the file in yer browser directly.</div>
     <div id="lobby-tip" style="margin-top:18px;font-size:13px;color:#c9a15f;font-style:italic;min-height:20px"></div>
     <div class="warn">⌨️ W/S drive · A/D steer · SPACE jump (twice = flip) · SHIFT boost · C ball-cam · ESC pause · M mute · V announcer<br>🎮 PS5 controller: R2 gas · L2 reverse · stick steer · ✕ jump · ◯/R1 boost · △ ball-cam · OPTIONS start/pause<br>🎮 This whole menu works with the controller too: D-pad or stick to move, ✕ to pick, OPTIONS to start. Keyboard: arrows/WASD + ENTER.<br>(Pair the controller and press any button so the browser detects it.) Solo demo — yer teammates &amp; rivals are bots. Watch yer ass: supersonic hits DEMOLISH folks now.<br><br><small style="opacity:.75">CREDITS — Cow &amp; farmer models: <b>Quaternius</b> (CC0). Announcer voice: <b>Kenney</b> Voiceover Pack (CC0), kenney.nl. Sounds via Wikimedia Commons: goal shout by <b>Frogfriend99</b> (CC BY-SA 3.0), vuvuzela by <b>DisillusionedBitterAndKnackered</b> (CC BY-SA 3.0), referee whistle by <b>SpliceSound</b> (CC0), moo by <b>MichaeltheFox8621</b> (CC BY-SA 4.0), crowd by <b>WebbFilmsUK</b> (CC BY 4.0), sad trombone by <b>Sad Tromboner</b> (CC BY 4.0), train horn by <b>WeenyBeany</b> (CC BY 4.0). 3D engine: three.js (MIT).</small></div>
@@ -7642,6 +7647,11 @@ function refreshNav(){
       Array.from(document.querySelectorAll('#mp-row .pick-btn')),
       [document.getElementById('start-btn')],
     ];
+    // test for the visible value, not "not hidden" -- an unset style reads '',
+    // which would wrongly count the box as showing
+    const jb = document.getElementById('mp-joinbox');
+    if(jb && jb.style.display === 'flex')
+      menuNav.rows.splice(6, 0, [document.getElementById('mp-go')]);
   } else if(ctx==='waitroom'){
     menuNav.rows = [
       [document.getElementById('wr-copy')],
@@ -8442,6 +8452,9 @@ function presentGoal(info){
 }
 
 function endMatch(){
+  if(NET.role === 'host' && game.state !== 'end' && NET.act.evt){
+    try{ NET.act.evt.send({t:'end'}); }catch(e){}
+  }
   game.state='end';
   const pt = game.player.team;
   const won = game.score[pt] > game.score[1-pt];
@@ -8474,6 +8487,12 @@ function endMatch(){
 }
 
 function togglePause(){
+  // In a shared match nobody gets to freeze the world: the host pausing would
+  // stall every other player, and a client pausing would just desync itself.
+  if(NET.role !== 'solo'){
+    announce("Can't pause a game with folks in it!", 1.8);
+    return;
+  }
   game.paused = !game.paused;
   const ov = document.getElementById('overlay-screen');
   if(game.paused){
@@ -8486,9 +8505,15 @@ function togglePause(){
   refreshNav();
 }
 document.getElementById('btn-resume').onclick = ()=>togglePause();
-document.getElementById('btn-rematch').onclick = ()=>{ document.getElementById('overlay-screen').style.display='none'; startMatch(true); };
+document.getElementById('btn-rematch').onclick = ()=>{
+  document.getElementById('overlay-screen').style.display='none';
+  if(NET.role === 'host'){ NET.beginMatch(); return; }        // re-rosters and tells everyone
+  if(NET.role === 'client'){ announce("Waitin' on the host to start another'n…", 2.4); return; }
+  startMatch(true);
+};
 document.getElementById('btn-lobby').onclick = ()=>{
   document.getElementById('overlay-screen').style.display='none';
+  if(NET.role !== 'solo') NET.quit();          // free the seat; don't linger in the room
   game.paused=false; game.state='lobby';
   HUD.hud.style.display='none';
   document.getElementById('lobby').style.display='block';
@@ -8718,13 +8743,21 @@ function showWaitroom(on){
 }
 
 NET.hostGame = function(){
-  if(!NET.available()){ alert("Multiplayer ain't available in this here window. Open the real page."); return; }
-  if(!NET.join(NET.makeCode(), true)) { alert("Couldn't start a room: " + NET.err); return; }
+  if(!NET.available()){ mpTip("⚠️ Multiplayer ain't available in this window."); return; }
+  if(!NET.join(NET.makeCode(), true)) { mpTip("⚠️ Couldn't open a room: " + NET.err); return; }
   NET.slots = NET.buildSlots(lobby.size);
   NET.seatPeer(NET.selfId, myName(), lobby.vehicle, lobby.team);   // host takes a seat
   // A joiner announces itself; the host seats it and re-broadcasts the table.
   NET.act.hello.onMessage = (d, ctx)=>{
     if(NET.role !== 'host') return;
+    NET.peers[ctx.peerId] = { name: (d&&d.name)||'HOSS', veh: (d&&d.veh)|0 };
+    // Mid-match arrival: no seat to give yet, so send the roster so they can
+    // watch, and they get picked up at the next kickoff by seatWaiting().
+    if(game.state !== 'lobby'){
+      if(NET.act.evt) try{ NET.act.evt.send({ t:'start', roster: NET.roster, spectate:1,
+        set:{ size:lobby.size, len:lobby.len, arena:lobby.arena } }, {target: ctx.peerId}); }catch(e){}
+      return;
+    }
     const seat = NET.slots.find(s=>s.peerId===ctx.peerId);
     if(seat){                                   // already seated -> it's a rename
       if(d && d.name){ seat.name = d.name; seat.veh = (d.veh)|0; }
@@ -8738,8 +8771,8 @@ NET.hostGame = function(){
 };
 
 NET.joinGame = function(code){
-  if(!NET.available()){ alert("Multiplayer ain't available in this here window. Open the real page."); return; }
-  if(!NET.join(code, false)) { alert("Couldn't join: " + NET.err); return; }
+  if(!NET.available()){ mpTip("⚠️ Multiplayer ain't available in this window."); return; }
+  if(!NET.join(code, false)) { mpTip("⚠️ Couldn't join: " + NET.err); return; }
   NET.act.lobby.onMessage = d=>{
     if(NET.role !== 'client' || !d) return;
     NET.settings = d;
@@ -8765,8 +8798,24 @@ NET.tickWaitroom = function(){
   if(NET.role !== 'host' || !NET.startAt) return;
   if(Date.now() >= NET.startAt){ NET.startAt = 0; NET.beginMatch(); }
 };
+// Anyone who turned up mid-match is sitting there seatless; give them a bot's
+// seat before the next kickoff rather than making them wait for an empty room.
+NET.seatWaiting = function(){
+  for(const id of Object.keys(NET.peers)){
+    if(NET.slots.find(s=>s.peerId === id)) continue;
+    if(NET.humanCount() >= MAX_HUMANS) break;
+    const seat = NET.slots.find(x=>x.type !== 'human');
+    if(!seat) break;
+    seat.type='human'; seat.peerId=id;
+    seat.name=(NET.peers[id] && NET.peers[id].name) || 'HOSS';
+    seat.veh=(NET.peers[id] && NET.peers[id].veh)|0;
+  }
+};
+
 NET.beginMatch = function(){
   if(NET.role === 'host'){
+    if(!NET.slots.length) NET.slots = NET.buildSlots(lobby.size);
+    NET.seatWaiting();
     for(const s of NET.slots) if(s.type === 'open') s.type = 'bot';   // <- the bot-fill
     NET.roster = NET.buildRoster();
     NET.pushLobby();
@@ -8949,11 +8998,14 @@ NET.wireMatchActions = function(){
   if(NET.act.evt) NET.act.evt.onMessage = d=>{
     if(NET.role !== 'client' || !d) return;
     if(d.t === 'start'){
+      if(!d.roster || !d.roster.length) return;
       NET.roster = d.roster;
+      NET.spectating = !!d.spectate;
       if(d.set){ lobby.size=d.set.size; lobby.len=d.set.len; lobby.arena=d.set.arena; }
       NET.snaps.length = 0;
       showWaitroom(false);
       startMatch(false);
+      if(NET.spectating) announce("Yer watchin' — yer in at the next kickoff!", 3.2);
     } else if(d.t === 'goal'){
       if(typeof presentGoal === 'function') presentGoal(d);
     } else if(d.t === 'end'){
@@ -9051,12 +9103,31 @@ function saveTurn(){
 });
 loadTurn();
 
-document.getElementById('mp-host').onclick = ()=>{ audio(); NET.hostGame(); };
+function mpTip(msg){ const t=document.getElementById('mp-tip'); if(t) t.textContent = msg; }
+document.getElementById('mp-host').onclick = ()=>{
+  audio();
+  if(!NET.available()){ mpTip("⚠️ Multiplayer needs the real page — this preview window blocks it."); return; }
+  mpTip("Openin' a room…");
+  NET.hostGame();
+};
 document.getElementById('mp-join').onclick = ()=>{
   audio();
-  const code = (prompt("Room code from yer host (4 letters):")||'').trim().toUpperCase();
-  if(code) NET.joinGame(code);
+  if(!NET.available()){ mpTip("⚠️ Multiplayer needs the real page — this preview window blocks it."); return; }
+  const box = document.getElementById('mp-joinbox');
+  box.style.display = box.style.display === 'none' ? 'flex' : 'none';
+  if(box.style.display === 'flex'){ mpTip("Type the 4-letter code yer host gave ya.");
+    try{ document.getElementById('mp-code').focus(); }catch(e){} }
+  refreshNav();
 };
+document.getElementById('mp-go').onclick = ()=>{
+  const code = (document.getElementById('mp-code').value||'').trim().toUpperCase();
+  if(code.length !== 4){ mpTip("That code's gotta be 4 letters, hoss."); return; }
+  mpTip("Lookin' for room " + code + "…");
+  NET.joinGame(code);
+};
+document.getElementById('mp-code').addEventListener('keydown', e=>{
+  if(e.code === 'Enter'){ e.stopPropagation(); document.getElementById('mp-go').onclick(); }
+});
 // Waitroom name box mirrors the lobby field and pushes the change live.
 document.getElementById('wr-name').oninput = ()=>{
   const v = (document.getElementById('wr-name').value || '').slice(0,16);
