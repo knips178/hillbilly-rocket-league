@@ -697,6 +697,23 @@ STILL TO DO (ideas for future iterations):
     </div>
     <div id="mp-tip" style="margin-top:6px;font-size:13px;color:#c9a15f;font-style:italic;min-height:18px">Anybody with the code can join from any browser — nothin' to install.</div>
 
+    <!-- Relay setup lives HERE, not in the waitin' room: the connection settings
+         are baked in when the room is created, so anything typed afterwards
+         would never reach the room you're already sittin' in. Host only --
+         one side carrying a relay is enough for everybody else. -->
+    <div class="btn-row" style="margin-top:8px">
+      <button class="pick-btn" id="mp-relay-toggle" style="font-size:13px;padding:8px 14px">📡 RELAY SETUP (for folks on cell data)</button>
+    </div>
+    <div id="mp-turn" style="display:none;margin-top:10px">
+      <input id="turn-url" placeholder="turn:na.relay.metered.ca:80" style="width:100%;max-width:420px;padding:8px;border-radius:6px;border:2px solid #5a3f22;background:rgba(0,0,0,.4);color:#f2e2c4;font-size:13px">
+      <div class="btn-row" style="margin-top:6px">
+        <input id="turn-user" placeholder="username" style="flex:1;min-width:110px;max-width:190px;padding:8px;border-radius:6px;border:2px solid #5a3f22;background:rgba(0,0,0,.4);color:#f2e2c4;font-size:13px">
+        <input id="turn-cred" placeholder="password" type="password" style="flex:1;min-width:110px;max-width:190px;padding:8px;border-radius:6px;border:2px solid #5a3f22;background:rgba(0,0,0,.4);color:#f2e2c4;font-size:13px">
+        <button class="pick-btn" id="turn-test" style="font-size:13px;padding:8px 14px">🧪 TEST</button>
+      </div>
+      <div id="turn-note" style="margin-top:6px;font-size:12px;color:#c9a15f;font-style:italic"></div>
+    </div>
+
     <button id="start-btn">🏁 PLAY SOLO (VS BOTS)</button>
     <div id="pad-blocked" style="display:none;margin-top:14px;padding:10px 14px;border:2px solid #c9702b;border-radius:8px;background:rgba(201,112,43,0.14);color:#f2c078;font-size:13px;line-height:1.4">🎮 <b>Heads up:</b> this embedded view blocks game controllers, so yer PS5 pad won't work here — that's the preview window, not the game. <b>Keyboard works fine.</b> To use the controller, download this page (⋯ menu → save) and open the file in yer browser directly.</div>
     <div id="lobby-tip" style="margin-top:18px;font-size:13px;color:#c9a15f;font-style:italic;min-height:20px"></div>
@@ -731,18 +748,7 @@ STILL TO DO (ideas for future iterations):
       <button class="pick-btn" id="wr-leave">🚪 BACK OUT</button>
     </div>
 
-    <!-- Host-only relay settings. Kept in this browser (localStorage), never in the
-         page source: only ONE side of a pair needs TURN, so the host carrying it is
-         enough for everybody else to connect. -->
-    <div id="wr-turn" style="margin-top:22px">
-      <div class="section" style="font-size:12px">Relay (only if folks can't connect)</div>
-      <input id="turn-url" placeholder="turn:na.relay.metered.ca:80" style="width:100%;max-width:420px;padding:8px;border-radius:6px;border:2px solid #5a3f22;background:rgba(0,0,0,.4);color:#f2e2c4;font-size:13px">
-      <div class="btn-row" style="margin-top:6px">
-        <input id="turn-user" placeholder="username" style="flex:1;min-width:120px;max-width:200px;padding:8px;border-radius:6px;border:2px solid #5a3f22;background:rgba(0,0,0,.4);color:#f2e2c4;font-size:13px">
-        <input id="turn-cred" placeholder="password" type="password" style="flex:1;min-width:120px;max-width:200px;padding:8px;border-radius:6px;border:2px solid #5a3f22;background:rgba(0,0,0,.4);color:#f2e2c4;font-size:13px">
-      </div>
-      <div id="turn-note" style="margin-top:6px;font-size:12px;color:#c9a15f;font-style:italic"></div>
-    </div>
+    <div id="wr-relay" style="margin-top:18px;font-size:13px;color:#c9a15f;font-style:italic"></div>
   </div>
 </div>
 
@@ -8604,7 +8610,9 @@ NET.freePeer = function(peerId){
 
 NET.rtcConfig = ()=> ({ iceServers: NET.turn ? NET_ICE.concat([NET.turn]) : NET_ICE });
 
+NET.waitStart = 0;
 NET.join = function(code, asHost){
+  NET.waitStart = Date.now();
   if(!NET.available()){ NET.err = 'multiplayer unavailable'; return false; }
   NET.leave();
   try{
@@ -8622,6 +8630,7 @@ NET.join = function(code, asHost){
     // host/join flow can be exercised locally. Never needed by real players.
     try{ if(new URLSearchParams(location.search).has('localtest'))
       cfg._test_only_mdnsHostFallbackToLoopback = true; }catch(e){}
+    NET.roomHadTurn = !!(NET.turn && NET.turn.urls);   // what THIS room was built with
     NET.room = window.TrysteroNostr.joinRoom(cfg, 'hrl-' + NET.code);
   }catch(e){ NET.err = e.message; NET.role='solo'; NET.room=null; return false; }
 
@@ -8707,6 +8716,10 @@ function renderWaitroom(){
     ? "Yer the host — yer machine runs the game."
     : "Yer connected. Waitin' on the host to start.";
   wrEl('wr-start').style.display = NET.role === 'host' ? '' : 'none';
+  const rel = wrEl('wr-relay');
+  if(rel) rel.textContent = NET.roomHadTurn
+    ? '📡 Relay ON — folks on cell data can get in.'
+    : '📡 No relay — only folks on yer own wifi can join. Set one up in the lobby.';
 
   const seats = NET.role === 'host' ? NET.slots : (NET.settings ? NET.settings.slots : []);
   const box = wrEl('wr-seats');
@@ -8721,6 +8734,24 @@ function renderWaitroom(){
   const humans = (seats||[]).filter(s=>s.type==='human').length;
   const left = NET.startAt ? Math.max(0, Math.ceil((NET.startAt - Date.now())/1000)) : 0;
   if(NET.err){ wrEl('wr-status').textContent = '⚠️ ' + NET.err; wrEl('wr-sub').textContent = ''; return; }
+  // Nobody showing up after a while, with no relay configured, is almost always
+  // two peers on different networks (e.g. one on cell data). Name it.
+  const alone = !Object.keys(NET.peers).length;
+  const waited = NET.waitStart ? (Date.now() - NET.waitStart)/1000 : 0;
+  if(alone && waited > 20 && !NET.roomHadTurn){
+    wrEl('wr-status').textContent = "Can't find each other";
+    wrEl('wr-sub').textContent = NET.role === 'host'
+      ? "If they're on cell data (not yer wifi), ya need a relay: BACK OUT → RELAY SETUP."
+      : "If yer on cell data, the host needs a relay set up on their end.";
+    return;
+  }
+  if(alone && waited > 35 && NET.roomHadTurn){
+    wrEl('wr-status').textContent = "Still lookin'…";
+    wrEl('wr-sub').textContent = NET.role === 'client'
+      ? "Double-check the code matches the host's exactly."
+      : "Make sure they typed the code exactly right.";
+    return;
+  }
   if(left > 0){
     wrEl('wr-status').textContent = "KICKOFF IN " + left + "s";
     wrEl('wr-sub').textContent = "Startin' with whoever's here — empty seats get bots.";
@@ -8795,6 +8826,11 @@ NET.quit = function(){ NET.leave(); NET.settings=null; NET.startAt=0; showWaitro
 
 // host-side tick: fire the auto-start clock
 NET.tickWaitroom = function(){
+  if(NET.role === 'solo') return;
+  // keep the waitin' room status live (stall hints, countdown) for host AND client
+  if(wrEl('waitroom') && wrEl('waitroom').style.display === 'block'){
+    if(!NET._wrPaint || Date.now() - NET._wrPaint > 500){ NET._wrPaint = Date.now(); renderWaitroom(); }
+  }
   if(NET.role !== 'host' || !NET.startAt) return;
   if(Date.now() >= NET.startAt){ NET.startAt = 0; NET.beginMatch(); }
 };
@@ -9102,6 +9138,45 @@ function saveTurn(){
   const el=document.getElementById(id); if(el) el.oninput = saveTurn;
 });
 loadTurn();
+
+document.getElementById('mp-relay-toggle').onclick = ()=>{
+  const b=document.getElementById('mp-turn');
+  b.style.display = b.style.display === 'block' ? 'none' : 'block';
+};
+
+// Credentials that look right but don't work are worse than none at all, because
+// the failure only shows up as "nobody joins". Gather ICE against the real config
+// and report whether a relay candidate actually comes back.
+NET.testTurn = function(note){
+  const t = NET.turn;
+  if(!t || !t.urls){ note("Nothin' entered yet."); return; }
+  let pc;
+  try{ pc = new RTCPeerConnection(NET.rtcConfig()); }
+  catch(e){ note("⚠️ Bad relay settings: " + e.message); return; }
+  let got = false, err = '';
+  note("Testin' the relay…");
+  pc.createDataChannel('t');
+  pc.onicecandidate = e=>{
+    if(e.candidate && e.candidate.type === 'relay'){
+      got = true;
+      note("✅ Relay works. Far-off folks can join.");
+      try{ pc.close(); }catch(x){}
+    }
+  };
+  pc.onicecandidateerror = e=>{ if(e.errorCode >= 400) err = 'code ' + e.errorCode; };
+  pc.createOffer().then(o=>pc.setLocalDescription(o)).catch(e=>note('⚠️ ' + e.message));
+  setTimeout(()=>{
+    if(!got){
+      note("❌ No relay candidate" + (err ? ' (' + err + ')' : '') +
+           " — check the address, username and password.");
+      try{ pc.close(); }catch(x){}
+    }
+  }, 8000);
+};
+document.getElementById('turn-test').onclick = ()=>{
+  saveTurn();
+  NET.testTurn(m=>{ const n=document.getElementById('turn-note'); if(n) n.textContent = m; });
+};
 
 function mpTip(msg){ const t=document.getElementById('mp-tip'); if(t) t.textContent = msg; }
 document.getElementById('mp-host').onclick = ()=>{
