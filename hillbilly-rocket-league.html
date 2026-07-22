@@ -704,6 +704,11 @@ STILL TO DO (ideas for future iterations):
     <h1 class="title" style="font-size:min(6vw,40px)">THE WAITIN' ROOM</h1>
     <div class="subtitle" id="wr-role">Hollerin' at the neighbors…</div>
 
+    <!-- Joining by invite link skips the lobby entirely, so the name has to be
+         editable here or deep-link players are all stuck as "Billy Bob". -->
+    <div class="section" style="font-size:12px">What's yer name, hoss?</div>
+    <input id="wr-name" maxlength="16" placeholder="Billy Bob" style="width:100%;max-width:320px;padding:9px;border-radius:7px;border:2px solid #5a3f22;background:rgba(0,0,0,.4);color:#f2e2c4;font-size:16px;text-align:center">
+
     <div class="section">Room code — tell yer people</div>
     <div class="code-box" id="wr-code">----</div>
     <div class="btn-row" style="margin-top:10px">
@@ -8567,11 +8572,18 @@ NET.join = function(code, asHost){
     NET.code = String(code||'').toUpperCase();
     NET.role = asHost ? 'host' : 'client';
     NET.selfId = window.TrysteroNostr.selfId;
-    NET.room = window.TrysteroNostr.joinRoom({
+    const cfg = {
       appId: 'hillbilly-rocket-league',
       relayConfig: { urls: NET_RELAYS, redundancy: 4 },
       rtcConfig: NET.rtcConfig(),
-    }, 'hrl-' + NET.code);
+    };
+    // Dev aid only (?localtest=1): two tabs on ONE machine can't reach each
+    // other, because ICE host candidates are mDNS names (.local) that a browser
+    // won't resolve for another tab. This rewrites them to loopback so the
+    // host/join flow can be exercised locally. Never needed by real players.
+    try{ if(new URLSearchParams(location.search).has('localtest'))
+      cfg._test_only_mdnsHostFallbackToLoopback = true; }catch(e){}
+    NET.room = window.TrysteroNostr.joinRoom(cfg, 'hrl-' + NET.code);
   }catch(e){ NET.err = e.message; NET.role='solo'; NET.room=null; return false; }
 
   NET.act.hello = NET.room.makeAction('hello');   // client -> host: who I am
@@ -8665,7 +8677,7 @@ NET.onchange = renderWaitroom;
 function showWaitroom(on){
   wrEl('waitroom').style.display = on ? 'block' : 'none';
   wrEl('lobby').style.display = on ? 'none' : 'block';
-  if(on) renderWaitroom();
+  if(on){ wrEl('wr-name').value = wrEl('player-name').value; renderWaitroom(); }
   refreshNav();
 }
 
@@ -8677,7 +8689,12 @@ NET.hostGame = function(){
   // A joiner announces itself; the host seats it and re-broadcasts the table.
   NET.act.hello.onMessage = (d, ctx)=>{
     if(NET.role !== 'host') return;
-    if(!NET.slots.find(s=>s.peerId===ctx.peerId)) NET.seatPeer(ctx.peerId, (d&&d.name)||'HOSS', (d&&d.veh)|0, null);
+    const seat = NET.slots.find(s=>s.peerId===ctx.peerId);
+    if(seat){                                   // already seated -> it's a rename
+      if(d && d.name){ seat.name = d.name; seat.veh = (d.veh)|0; }
+      NET.pushLobby(); renderWaitroom(); return;
+    }
+    NET.seatPeer(ctx.peerId, (d&&d.name)||'HOSS', (d&&d.veh)|0, null);
     NET.armAutoStart(); NET.pushLobby(); renderWaitroom();
   };
   showWaitroom(true);
@@ -8800,6 +8817,17 @@ document.getElementById('mp-join').onclick = ()=>{
   audio();
   const code = (prompt("Room code from yer host (4 letters):")||'').trim().toUpperCase();
   if(code) NET.joinGame(code);
+};
+// Waitroom name box mirrors the lobby field and pushes the change live.
+document.getElementById('wr-name').oninput = ()=>{
+  const v = (document.getElementById('wr-name').value || '').slice(0,16);
+  document.getElementById('player-name').value = v;
+  if(NET.role === 'host'){
+    const seat = NET.slots.find(s=>s.peerId===NET.selfId);
+    if(seat){ seat.name = myName(); NET.pushLobby(); renderWaitroom(); }
+  } else if(NET.role === 'client' && NET.act.hello){
+    try{ NET.act.hello.send({ name: myName(), veh: lobby.vehicle }); }catch(e){}
+  }
 };
 document.getElementById('wr-start').onclick = ()=>{ if(NET.role==='host') NET.beginMatch(); };
 document.getElementById('wr-leave').onclick = ()=>NET.quit();
