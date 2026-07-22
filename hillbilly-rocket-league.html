@@ -7697,8 +7697,8 @@ addEventListener('keydown', e=>{
   if(e.code==='KeyM'){ setMuted(!muted); announce(muted ? 'MUTED. ENJOY THE SILENCE, CITY SLICKER.' : "SOUND'S BACK ON, BABY!", 1.6, false); }
   if(e.code==='KeyV'){ voiceOn = !voiceOn; announce(voiceOn ? 'ANNOUNCER: ON' : 'ANNOUNCER: FIRED', 1.6, false); try{ if(!voiceOn && window.speechSynthesis) speechSynthesis.cancel(); }catch(err){} }
   if(e.code==='Escape' && (game.state==='play'||game.state==='countdown')) togglePause();
-  if(e.code==='Space' && game.player && (game.state==='play'||game.state==='countdown')) tryJump(game.player);
-  if((e.code==='KeyE'||e.code==='KeyF') && game.player && !game.paused) useSpecial(game.player);   // signature move
+  if(e.code==='Space' && game.player && (game.state==='play'||game.state==='countdown')) localJump(game.player);
+  if((e.code==='KeyE'||e.code==='KeyF') && game.player && !game.paused) localSpecial(game.player);   // signature move
 });
 addEventListener('keyup', e=>{ keys[e.code]=false; });
 let ballCam = true;
@@ -8381,22 +8381,39 @@ function resetKickoff(){
   }
 }
 
+// Host-authoritative half: mutate state, tell everyone, then run the show.
+// Clients never call this -- they receive a 'goal' event and call presentGoal
+// directly, so the celebration is identical without them owning the score.
 function scoreGoal(team){
   const gv = goalValue(team);                     // trick shots + LAST CALL are worth more
   game.score[team] += gv.pts;
+  const scorer = ball.lastTouch;
+  const info = { t:'goal', team, pts:gv.pts, tag:gv.tag,
+                 scorerName: scorer ? scorer.name : null,
+                 scorerTeam: scorer ? scorer.team : -1 };
+  if(scorer && scorer.team === team) scorer.goals++;
+  if(NET.role === 'host' && NET.act.evt){ try{ NET.act.evt.send(info); }catch(e){} }
+  presentGoal(info);
+  if(game.overtime) setTimeout(()=>{
+    if(NET.role === 'host' && NET.act.evt){ try{ NET.act.evt.send({t:'end'}); }catch(e){} }
+    endMatch();
+  }, 1800);
+}
+
+// Presentation half: safe to run anywhere, driven entirely by the payload.
+function presentGoal(info){
+  const team = info.team;
+  if(NET.role === 'client'){ game.score[team] = (game.score[team]|0) + (info.pts|0); }
   ball.heat = 0; ball.onFire = false; ball.fireT = 0; ball.touchT = []; ball.spin.set(0,0,0);
   HUD.sb.textContent = game.score[0]; HUD.sr.textContent = game.score[1];
   goalHorn(); playVox('goal'); rumble(600, 1, 1);                       // real "GOOOAL!" shout + horn
-  if(gv.pts > 1) setTimeout(()=>announce('+'+gv.pts+' — '+gv.tag, 3.0), 900);
+  if(info.pts > 1) setTimeout(()=>announce('+'+info.pts+' — '+info.tag, 3.0), 900);
   if(Math.random()<0.6) setTimeout(()=>playSample('sfx:vuvu', 0.5), 650); // stadium vuvuzela
-  const playerTeam = game.player.team;
-  // credit (or blame) the last toucher
-  const scorer = ball.lastTouch;
-  if(scorer && scorer.team===team){
-    scorer.goals++;
-    announceVO('goalName', 3.4, { N: scorer.name.toUpperCase() });
-  } else if(scorer){
-    announceVO('ownGoal', 3.4, { N: scorer.name.toUpperCase() });
+  const playerTeam = game.player ? game.player.team : 0;
+  if(info.scorerName && info.scorerTeam === team){
+    announceVO('goalName', 3.4, { N: info.scorerName.toUpperCase() });
+  } else if(info.scorerName){
+    announceVO('ownGoal', 3.4, { N: info.scorerName.toUpperCase() });
   } else {
     announceVO(team===playerTeam ? 'goalFor' : 'goalAgainst', 3.4);
   }
@@ -8422,9 +8439,6 @@ function scoreGoal(team){
   const gx = team===0 ? 1 : -1;              // shove the ball on into the barn so ya see it roll all the way in
   ball.vel.set(gx*42, 7, ball.vel.z*0.35);
   game.state='goal'; game.goalT = 3.2;
-  if(game.overtime){
-    setTimeout(()=>endMatch(), 1800);
-  }
 }
 
 function endMatch(){
@@ -8595,9 +8609,31 @@ NET.join = function(code, asHost){
   NET.room.onPeerJoin = id => { NET.peers[id] = NET.peers[id] || {}; NET.fire(); };
   NET.room.onPeerLeave = id => {
     delete NET.peers[id];
-    if(NET.role==='host') NET.freePeer(id);      // their car keeps playing, as a bot
+    if(NET.role === 'host'){
+      NET.freePeer(id);
+      delete NET.inputs[id];
+      // Mid-match: hand the abandoned car straight to the AI. No respawn, no
+      // gap -- it just carries on, which is the whole point of driving every
+      // car through the same input object.
+      const car = cars.find(c=>c.netPeer === id);
+      if(car){
+        car.netPeer = null;
+        if(!car.persona) car.persona = PERSONAS[Math.floor(Math.random()*PERSONAS.length)];
+        if(game.state === 'play' || game.state === 'countdown'){
+          chatMsg('PA', car.team, car.name.toUpperCase() + " RAGE QUIT — the mule's drivin' now");
+        }
+      }
+      NET.pushLobby();
+    } else if(NET.role === 'client' && !Object.keys(NET.peers).length){
+      // the host is the only peer a client has; losing it ends the match
+      NET.err = 'Host quit the game.';
+      NET.quit();
+      game.state = 'lobby'; HUD.hud.style.display='none';
+      document.getElementById('lobby').style.display='block';
+    }
     NET.fire();
   };
+  NET.wireMatchActions();
   NET.err=''; NET.fire();
   return true;
 };
@@ -8732,10 +8768,198 @@ NET.tickWaitroom = function(){
 NET.beginMatch = function(){
   if(NET.role === 'host'){
     for(const s of NET.slots) if(s.type === 'open') s.type = 'bot';   // <- the bot-fill
+    NET.roster = NET.buildRoster();
     NET.pushLobby();
+    if(NET.act.evt) try{ NET.act.evt.send({ t:'start', roster: NET.roster,
+      set:{ size:lobby.size, len:lobby.len, arena:lobby.arena } }); }catch(e){}
   }
   showWaitroom(false);
   startMatch(false);
+};
+
+// The host bakes every random choice (bot names, vehicles) into a roster so
+// each machine builds an identical cars[] in identical order.
+NET.buildRoster = function(){
+  const names = BOT_NAMES.slice().sort(()=>Math.random()-0.5);
+  let ni = 0;
+  return NET.slots.map(s=>({
+    team: s.team,
+    type: s.type === 'human' ? 'human' : 'bot',
+    peerId: s.type === 'human' ? s.peerId : null,
+    name: s.type === 'human' ? (s.name || 'HOSS') : names[ni++ % names.length],
+    veh:  s.type === 'human' ? (s.veh|0) : Math.floor(Math.random()*VEHICLES.length),
+  }));
+};
+
+// ---- in-match networking ---------------------------------------------------
+// Host simulates everything and ships snapshots; clients render them and only
+// predict their own car. See AGENTS.md for why lockstep was rejected.
+const SNAP_HZ = 20, INPUT_HZ = 30;
+const INTERP_MS = 110;              // render this far behind the host's clock
+NET.inputs = {};                    // peerId -> latest {throttle,steer,boost,jump,special,seq}
+NET.snaps = [];                     // client-side snapshot buffer
+NET._lastSnap = 0; NET._lastInput = 0; NET._jumpSeq = 0; NET._specSeq = 0;
+
+NET.carState = c => [
+  +c.pos.x.toFixed(2), +c.pos.y.toFixed(2), +c.pos.z.toFixed(2),
+  +c.yaw.toFixed(3),
+  +c.vel.x.toFixed(2), +c.vel.y.toFixed(2), +c.vel.z.toFixed(2),
+  Math.round(c.boost), c.dead > 0 ? 1 : 0,
+];
+
+NET.sendSnapshot = function(){
+  if(NET.role !== 'host' || !NET.act.snap) return;
+  const now = performance.now();
+  if(now - NET._lastSnap < 1000/SNAP_HZ) return;
+  NET._lastSnap = now;
+  try{
+    NET.act.snap.send({
+      t: now,
+      c: cars.map(NET.carState),
+      b: [ +ball.pos.x.toFixed(2), +ball.pos.y.toFixed(2), +ball.pos.z.toFixed(2),
+           +ball.vel.x.toFixed(2), +ball.vel.y.toFixed(2), +ball.vel.z.toFixed(2) ],
+      s: game.score, st: game.state, tl: +game.timeLeft.toFixed(1),
+      cd: +game.countdownT.toFixed(2), ot: game.overtime ? 1 : 0,
+    });
+  }catch(e){}
+};
+
+// Client -> host: control state. Jump and special are edge-triggered in the
+// key handlers, so they ride as monotonic counters -- a dropped or reordered
+// packet can't swallow or duplicate a press.
+NET.sendInput = function(pin){
+  if(NET.role !== 'client' || !NET.act.input) return;
+  const now = performance.now();
+  if(now - NET._lastInput < 1000/INPUT_HZ) return;
+  NET._lastInput = now;
+  try{
+    NET.act.input.send({ th:+pin.throttle.toFixed(2), st:+pin.steer.toFixed(2),
+                         b: pin.boost?1:0, j: NET._jumpSeq, sp: NET._specSeq });
+  }catch(e){}
+};
+
+// Host applies a remote player's controls in place of botInput().
+NET.remoteInput = function(peerId){
+  const i = NET.inputs[peerId];
+  if(!i) return { throttle:0, steer:0, boost:false };
+  return { throttle: i.th||0, steer: i.st||0, boost: !!i.b };
+};
+
+function lerpAngle(a, b, t){                       // shortest way round the circle
+  let d = (b - a) % (Math.PI*2);
+  if(d >  Math.PI) d -= Math.PI*2;
+  if(d < -Math.PI) d += Math.PI*2;
+  return a + d*t;
+}
+
+// Client render path. Remote cars and the ball are interpolated between the two
+// snapshots bracketing (host clock - INTERP_MS). The local car is NOT waited on:
+// it runs the real physics against local input and is then eased toward the
+// host's authoritative position, because at the 122ms relay RTT we measured,
+// waiting for the server would make steering feel broken.
+NET.CORRECT = 0.12;          // per-snapshot blend toward authority
+NET.SNAP_DIST = 9;           // beyond this, stop easing and just teleport
+NET.applySnapshots = function(dt, pin, canDrive){
+  if(!NET.snaps.length) return;
+  const now = performance.now();
+  const newest = NET.snaps[NET.snaps.length-1];
+  const renderT = newest.t - INTERP_MS + (now - newest._rx);
+
+  let a = NET.snaps[0], b = null;
+  for(let i=NET.snaps.length-1; i>=0; i--){
+    if(NET.snaps[i].t <= renderT){ a = NET.snaps[i]; b = NET.snaps[i+1] || null; break; }
+  }
+  const span = b ? (b.t - a.t) : 0;
+  const al = span > 0 ? THREE.MathUtils.clamp((renderT - a.t)/span, 0, 1) : 0;
+  while(NET.snaps.length > 2 && NET.snaps[1].t < renderT - 500) NET.snaps.shift();
+
+  for(let i=0;i<cars.length;i++){
+    const c = cars[i], sa = a.c[i], sb = b ? b.c[i] : null;
+    if(!sa) continue;
+    if(c.isPlayer){
+      // predict locally, then correct softly toward the host
+      updateCar(c, dt, canDrive ? pin : {throttle:0,steer:0,boost:false});
+      const tx = sb ? sa[0]+(sb[0]-sa[0])*al : sa[0];
+      const ty = sb ? sa[1]+(sb[1]-sa[1])*al : sa[1];
+      const tz = sb ? sa[2]+(sb[2]-sa[2])*al : sa[2];
+      const err = Math.hypot(tx-c.pos.x, ty-c.pos.y, tz-c.pos.z);
+      NET.lastErr = err;
+      if(err > NET.SNAP_DIST){ c.pos.set(tx,ty,tz); c.vel.set(sa[4],sa[5],sa[6]); }
+      else {
+        c.pos.x += (tx-c.pos.x)*NET.CORRECT;
+        c.pos.y += (ty-c.pos.y)*NET.CORRECT;
+        c.pos.z += (tz-c.pos.z)*NET.CORRECT;
+      }
+      c.boost = sa[7];
+    } else {
+      if(sb){
+        c.pos.set(sa[0]+(sb[0]-sa[0])*al, sa[1]+(sb[1]-sa[1])*al, sa[2]+(sb[2]-sa[2])*al);
+        c.yaw = lerpAngle(sa[3], sb[3], al);
+      } else {
+        c.pos.set(sa[0], sa[1], sa[2]); c.yaw = sa[3];
+      }
+      c.vel.set(sa[4], sa[5], sa[6]);
+      c.boost = sa[7];
+      if(sa[8] && c.dead <= 0) c.dead = 0.1;
+      if(!sa[8] && c.dead > 0) c.dead = 0;
+      c.mesh.visible = !sa[8];
+      c.mesh.position.copy(c.pos);
+      c.mesh.rotation.set(0, c.yaw, 0);
+      if(c.tag){ c.tag.position.set(c.pos.x, c.pos.y + 5.2, c.pos.z); c.tag.visible = !sa[8]; }
+    }
+  }
+
+  const ba = a.b, bb = b ? b.b : null;
+  if(bb) ball.pos.set(ba[0]+(bb[0]-ba[0])*al, ba[1]+(bb[1]-ba[1])*al, ba[2]+(bb[2]-ba[2])*al);
+  else   ball.pos.set(ba[0], ba[1], ba[2]);
+  ball.vel.set(ba[3], ba[4], ba[5]);
+  ballMesh.position.copy(ball.pos);
+
+  // authoritative match state
+  if(a.s){ game.score[0]=a.s[0]; game.score[1]=a.s[1];
+           HUD.sb.textContent=a.s[0]; HUD.sr.textContent=a.s[1]; }
+  game.timeLeft = a.tl; game.overtime = !!a.ot;
+  if(a.st && a.st !== game.state) game.state = a.st;
+  game.countdownT = a.cd;
+};
+
+// A client fires its own jump/special immediately for feel, and bumps a counter
+// the host reads. Position stays authoritative, so a mispredicted jump just gets
+// corrected -- but the press is never swallowed by a lost packet.
+function localJump(c){ if(NET.role === 'client') NET._jumpSeq++; tryJump(c); }
+function localSpecial(c){ if(NET.role === 'client') NET._specSeq++; useSpecial(c); }
+
+NET.wireMatchActions = function(){
+  if(NET.act.input) NET.act.input.onMessage = (d, ctx)=>{
+    if(NET.role !== 'host' || !d) return;
+    const prev = NET.inputs[ctx.peerId];
+    NET.inputs[ctx.peerId] = d;
+    const car = cars.find(c=>c.netPeer === ctx.peerId);
+    if(!car) return;
+    // edge-triggered actions: fire once per counter increment
+    if(prev && d.j > prev.j && game.state !== 'lobby') tryJump(car);
+    if(prev && d.sp > prev.sp && !game.paused) useSpecial(car);
+  };
+  if(NET.act.snap) NET.act.snap.onMessage = d=>{
+    if(NET.role !== 'client' || !d) return;
+    d._rx = performance.now();
+    NET.snaps.push(d);
+    if(NET.snaps.length > 40) NET.snaps.shift();
+  };
+  if(NET.act.evt) NET.act.evt.onMessage = d=>{
+    if(NET.role !== 'client' || !d) return;
+    if(d.t === 'start'){
+      NET.roster = d.roster;
+      if(d.set){ lobby.size=d.set.size; lobby.len=d.set.len; lobby.arena=d.set.arena; }
+      NET.snaps.length = 0;
+      showWaitroom(false);
+      startMatch(false);
+    } else if(d.t === 'goal'){
+      if(typeof presentGoal === 'function') presentGoal(d);
+    } else if(d.t === 'end'){
+      if(game.state !== 'end') endMatch();
+    }
+  };
 };
 
 // ---------------- MATCH SETUP ----------------
@@ -8748,11 +8972,26 @@ function startMatch(rematch){
   const names = BOT_NAMES.slice().sort(()=>Math.random()-0.5);
   let ni = 0;
 
-  game.player = makeCar(pname, lobby.team, lobby.vehicle, true);
-  for(let t=0;t<2;t++){
-    const need = lobby.size - (t===lobby.team ? 1 : 0);
-    for(let i=0;i<need;i++){
-      makeCar(names[ni++ % names.length], t, Math.floor(Math.random()*VEHICLES.length), false);
+  if(NET.role !== 'solo' && NET.roster && NET.roster.length){
+    // Networked: the ROSTER is authoritative and identical on every machine, so
+    // cars[] ends up in the same order everywhere and snapshot indices line up.
+    // Everything the host randomises (bot names, vehicles) is baked into it.
+    for(const r of NET.roster){
+      const mine = r.type === 'human' && r.peerId === NET.selfId;
+      const c = makeCar(r.name, r.team, r.veh|0, mine);
+      c.netPeer = (r.type === 'human' && !mine) ? r.peerId : null;
+      if(mine) game.player = c;
+    }
+    // A host watching its own match still needs a camera target if it somehow
+    // holds no seat; fall back to the first car rather than crashing on null.
+    if(!game.player) game.player = cars[0];
+  } else {
+    game.player = makeCar(pname, lobby.team, lobby.vehicle, true);
+    for(let t=0;t<2;t++){
+      const need = lobby.size - (t===lobby.team ? 1 : 0);
+      for(let i=0;i<need;i++){
+        makeCar(names[ni++ % names.length], t, Math.floor(Math.random()*VEHICLES.length), false);
+      }
     }
   }
   game.score=[0,0]; game.overtime=false; game.timeLeft = lobby.len;
@@ -8963,15 +9202,15 @@ function animate(){
     } else {
       if(pad.pauseEdge && (game.state==='play'||game.state==='countdown')) togglePause();
       if(pad.camEdge) ballCam = !ballCam;
-      if(pad.jumpEdge && game.player && !game.paused && (game.state==='play'||game.state==='countdown')) tryJump(game.player);
-      if(pad.specialEdge && game.player && !game.paused) useSpecial(game.player);
+      if(pad.jumpEdge && game.player && !game.paused && (game.state==='play'||game.state==='countdown')) localJump(game.player);
+      if(pad.specialEdge && game.player && !game.paused) localSpecial(game.player);
     }
   }
   if(TOUCH.on){
     if(TOUCH.pauseEdge && (game.state==='play'||game.state==='countdown')) togglePause();
     if(TOUCH.camEdge) ballCam = !ballCam;
-    if(TOUCH.jumpEdge && game.player && !game.paused && (game.state==='play'||game.state==='countdown')) tryJump(game.player);
-    if(TOUCH.specialEdge && game.player && !game.paused) useSpecial(game.player);
+    if(TOUCH.jumpEdge && game.player && !game.paused && (game.state==='play'||game.state==='countdown')) localJump(game.player);
+    if(TOUCH.specialEdge && game.player && !game.paused) localSpecial(game.player);
     TOUCH.pauseEdge = TOUCH.camEdge = TOUCH.jumpEdge = TOUCH.specialEdge = false;
   }
 
@@ -9012,9 +9251,14 @@ function animate(){
   }
 
   if(game.state==='goal'){
-    game.goalT -= dt;
-    updateBall(dt);
-    if(game.goalT<=0 && !game.overtime) resetKickoff();
+    if(NET.role === 'client'){
+      // keep rendering the host's celebration; it owns the kickoff reset
+      NET.applySnapshots(dt, {throttle:0,steer:0,boost:false}, false);
+    } else {
+      game.goalT -= dt;
+      updateBall(dt);
+      if(game.goalT<=0 && !game.overtime) resetKickoff();
+    }
   }
 
   if(game.state==='play' || game.state==='countdown'){
@@ -9041,22 +9285,32 @@ function animate(){
       }
     }
 
-    for(const c of cars){
-      const input = c.isPlayer ? pin : (canDrive ? botInput(c, dt) : {throttle:0,steer:0,boost:false});
-      updateCar(c, dt, input);
-    }
-    if(canDrive){
-      updateBall(dt);
-      for(const c of cars) carBallCollide(c, dt);
-      for(let i=0;i<cars.length;i++) for(let j=i+1;j<cars.length;j++) carCarCollide(cars[i],cars[j]);
-      tickWildcard(dt);
-      tickMoonJug(dt);
-      updateCrossers(dt);
-      tickRoadkills(dt);
+    if(NET.role === 'client'){
+      // Clients don't simulate the world -- they render the host's and predict
+      // only their own car (inside applySnapshots).
+      NET.sendInput(pin);
+      NET.applySnapshots(dt, pin, canDrive);
+    } else {
+      for(const c of cars){
+        const input = c.isPlayer ? pin
+                    : (c.netPeer ? (canDrive ? NET.remoteInput(c.netPeer) : {throttle:0,steer:0,boost:false})
+                                 : (canDrive ? botInput(c, dt) : {throttle:0,steer:0,boost:false}));
+        updateCar(c, dt, input);
+      }
+      if(canDrive){
+        updateBall(dt);
+        for(const c of cars) carBallCollide(c, dt);
+        for(let i=0;i<cars.length;i++) for(let j=i+1;j<cars.length;j++) carCarCollide(cars[i],cars[j]);
+        tickWildcard(dt);
+        tickMoonJug(dt);
+        updateCrossers(dt);
+        tickRoadkills(dt);
+      }
+      NET.sendSnapshot();
     }
 
     // clock
-    if(game.state==='play' && !game.overtime){
+    if(game.state==='play' && !game.overtime && NET.role !== 'client'){   // clients take the clock from snapshots
       game.timeLeft -= dt;
       tickLastCall();
       if(game.timeLeft<=0){
