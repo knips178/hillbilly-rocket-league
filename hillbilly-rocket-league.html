@@ -8634,7 +8634,9 @@ NET.diagText = function(){
     '\nfound-each-other (remoteSDP) ' + d.remoteSDP +
     '\nmy candidates ' + cands +
     '\npeers ' + peers + '   states ' + (JSON.stringify(d.pcs)||'{}') +
-    (d.iceErr ? '\n' + d.iceErr : '');
+    // 701 only means one of the redundant STUN servers was unreachable. If a
+    // srflx candidate still arrived it cost us nothing -- don't raise an alarm.
+    ((d.iceErr && !d.cand.srflx) ? '\n' + d.iceErr : '');
 };
 
 // Room codes: unambiguous alphabet, no O/0/I/1 to survive being read aloud.
