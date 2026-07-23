@@ -152,6 +152,27 @@ Yaw means "angle within the current surface frame", so it is re-expressed at eve
 Harness pins all of it: nose-only boost doesn't climb, nose-up boost does, all four wall frames are
 unit + correctly oriented, and the camera stays behind and outside the wall on each.
 
+## The playable shell (floor -> wall -> ceiling is ONE surface)
+
+After the RL rescale the physics walls (±65.6) and ceiling (32.7) had **no meshes at all** — the
+visible barn sits 30 units further out, so cars were driving on invisible planes and the "ceiling"
+was open air. Fixed by generating the shell from the SAME cross-section `projectWall` uses:
+
+- `wallRamps` — opaque timber **kick-plates**: the bottom quarter-round, floor to `WALL_R`.
+- `wallRail` — a painted rail capping the kick-plates. This is the line that makes boards read as
+  boards; without it the curve just looked like a smudge.
+- `arenaGlass` — see-through **boards** from `WALL_R` up, over the top fillet, plus the drivable roof
+  at `ceil`. Transparent on purpose (RL glass) so the hay bales, crowd and barn still show through.
+- Per-venue `ramp` / `glass` / `rail` colours live in `ARENA_LOOKS`.
+
+Physics gained the matching **wall→ceiling fillet** in `projectWall` (mirrors the bottom one), so a
+car rounds onto the roof instead of hitting a hard corner, then hands over to `wallAxis === 2` once
+it's past the curve. Verified the profile is continuous: normal runs (-0.71,0.71) at the floor →
+(-1,0) up the wall → (-0.89,-0.45) over the top → the ceiling.
+
+**Anything that changes the shell must change both** — the mesh and `projectWall` — or you get
+invisible walls again. Generate from one profile, never hand-place them.
+
 ## Curved walls / wall-riding (keep this working)
 
 Cars drive up the walls RL-style. Each wall meets the floor through a quarter-circle fillet of

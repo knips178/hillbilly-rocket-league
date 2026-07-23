@@ -6126,10 +6126,10 @@ function updateDucks(dt){
 
 // venue looks: fog + light tint + floor surface + weather + which scenery/boards/goal dressing stands
 const ARENA_LOOKS = [
-  { fog:0x46283c, near:200, far:460, sky:0xbb7a99, ground:0x2a1d0d, sunC:0xffb070, sunI:1.15, map:()=>fieldTex, weather:'off',       shell:true,  bog:false, marsh:false, boards:'barn',  outer:0x4a3a20, amb:'none' },
-  { fog:0x2c3c50, near:170, far:430, sky:0x9fc4e8, ground:0x24303c, sunC:0xcfe4ff, sunI:1.0,  map:()=>iceTex,   weather:'snow',      shell:true,  bog:false, marsh:false, boards:'barn',  outer:0x4a4438, amb:'wind' },
-  { fog:0x25301e, near:150, far:430, sky:0x7a9a6a, ground:0x1a1608, sunC:0xd8e89a, sunI:0.85, map:()=>bogTex,   weather:'fireflies', shell:false, bog:true,  marsh:false, boards:'bog',   outer:0x2c2c1a, amb:'crickets' },
-  { fog:0x8a94a0, near:180, far:470, sky:0xc8d4e0, ground:0x3a4434, sunC:0xffd9a0, sunI:1.05, map:()=>marshTex, weather:'off',       shell:false, bog:false, marsh:true,  boards:'marsh', outer:0x3a5548, amb:'crickets' },
+  { fog:0x46283c, near:200, far:460, sky:0xbb7a99, ground:0x2a1d0d, sunC:0xffb070, sunI:1.15, map:()=>fieldTex, weather:'off',       shell:true,  bog:false, marsh:false, boards:'barn',  outer:0x4a3a20, amb:'none',     ramp:0x7d5a30, glass:0xd8c9a4, rail:0xd8a53a },
+  { fog:0x2c3c50, near:170, far:430, sky:0x9fc4e8, ground:0x24303c, sunC:0xcfe4ff, sunI:1.0,  map:()=>iceTex,   weather:'snow',      shell:true,  bog:false, marsh:false, boards:'barn',  outer:0x4a4438, amb:'wind',     ramp:0x6f7684, glass:0xcfe4f2, rail:0x9fd0e8 },
+  { fog:0x25301e, near:150, far:430, sky:0x7a9a6a, ground:0x1a1608, sunC:0xd8e89a, sunI:0.85, map:()=>bogTex,   weather:'fireflies', shell:false, bog:true,  marsh:false, boards:'bog',   outer:0x2c2c1a, amb:'crickets', ramp:0x4d4a2a, glass:0xb8c49a, rail:0x9aa845 },
+  { fog:0x8a94a0, near:180, far:470, sky:0xc8d4e0, ground:0x3a4434, sunC:0xffd9a0, sunI:1.05, map:()=>marshTex, weather:'off',       shell:false, bog:false, marsh:true,  boards:'marsh', outer:0x3a5548, amb:'crickets', ramp:0x5c6b52, glass:0xc4d6cc, rail:0xc2a35a },
 ];
 function applyArena(i){
   const L = ARENA_LOOKS[i] || ARENA_LOOKS[0];
@@ -6152,6 +6152,8 @@ function applyArena(i){
   goalMarshDecor.visible = L.boards==='marsh';
   if(mud.material && mud.material.color && mud.material.color.setHex) mud.material.color.setHex(L.outer);
   if(wallRampMat && wallRampMat.color && wallRampMat.color.setHex) wallRampMat.color.setHex(L.ramp || L.ground || 0x6a5a3a);
+  if(glassMat && glassMat.color && glassMat.color.setHex) glassMat.color.setHex(L.glass || 0xbfd6d0);
+  if(railMat && railMat.color && railMat.color.setHex) railMat.color.setHex(L.rail || 0xd8a53a);
   setAmbience(L.amb || 'none');
   setWeather(L.weather);
 }
@@ -6170,38 +6172,82 @@ scene.add(mud);
 const barnShell = new THREE.Group();
 scene.add(barnShell);
 
-// ---- curved wall bases (the quarter-pipes you ride up) ----
-// Built straight from the same fillet arc the physics uses, so the ramp you SEE
-// is the surface the car actually climbs. Present in every arena; tinted per
-// venue in applyArena. Guarded so the headless harness (no BufferGeometry) skips it.
-const wallRamps = new THREE.Group();
-let wallRampMat = null;
-scene.add(wallRamps);
+// ---- THE PLAYABLE SHELL -------------------------------------------------
+// One continuous surface: floor -> curved kick-plate -> boards -> curved top ->
+// roof, generated from the SAME cross-section the physics uses (projectWall), so
+// what ya drive on is exactly what ya see. No seams, no invisible walls.
+// Themed like a barn rink: solid timber kick-plates down low, scratched-up
+// plexiglass boards above so the hay bales and crowd still show through.
+const wallRamps = new THREE.Group();          // kick-plates (opaque)
+const arenaGlass = new THREE.Group();         // boards + roof (see-through)
+const wallRail  = new THREE.Group();          // painted rail capping the kick-plates
+let wallRampMat = null, glassMat = null, railMat = null;
+scene.add(wallRamps); scene.add(arenaGlass); scene.add(wallRail);
+
 if(typeof THREE.BufferGeometry === 'function' && typeof THREE.Float32BufferAttribute === 'function'){
   wallRampMat = new THREE.MeshLambertMaterial({ color:0x6a5a3a, side:THREE.DoubleSide });
-  const buildFillet = (axis, sign, aA, aB)=>{
-    const N = 12, pos = [], idx = [];
-    const half = axis===0 ? ARENA.halfX : ARENA.halfZ;
-    for(let i=0;i<=N;i++){
-      const phi = (i/N)*(Math.PI/2), s = Math.sin(phi), co = Math.cos(phi);
-      const perp = sign*(half - WALL_R + WALL_R*s), py = WALL_R - WALL_R*co;
-      for(const along of [aA, aB]){
-        if(axis===0) pos.push(perp, py, along); else pos.push(along, py, perp);
+  glassMat = new THREE.MeshLambertMaterial({ color:0xbfd6d0, transparent:true, opacity:0.16,
+                                             side:THREE.DoubleSide, depthWrite:false });
+  railMat  = new THREE.MeshLambertMaterial({ color:0xd8a53a, emissive:0x3a2405, side:THREE.DoubleSide });
+
+  // Cross-section of the shell, from the pitch edge up and over. `perp` is the
+  // distance out toward the wall plane; y is height. Matches projectWall exactly.
+  const R = WALL_R, CH = ARENA.ceil, topC = CH - R;
+  const kickProfile = (half)=>{                       // floor -> top of the bottom curve
+    const pts = [], N = 10;
+    for(let i=0;i<=N;i++){ const t=(i/N)*(Math.PI/2);
+      pts.push([half - R + R*Math.sin(t), R - R*Math.cos(t)]); }
+    return pts;
+  };
+  const glassProfile = (half)=>{                      // boards, then over the top curve
+    const pts = [], N = 10;
+    pts.push([half, R]);
+    pts.push([half, topC]);
+    for(let i=1;i<=N;i++){ const t=(i/N)*(Math.PI/2);
+      pts.push([half - R + R*Math.cos(t), topC + R*Math.sin(t)]); }
+    return pts;
+  };
+
+  // Sweep a cross-section along a wall. axis 0 = the ±X walls (swept in z),
+  // axis 1 = the ±Z walls (swept in x).
+  const sweep = (axis, sign, profile, aA, aB, mat, group)=>{
+    const pos = [], idx = [], uv = [];
+    const M = profile.length;
+    for(let i=0;i<M;i++){
+      const [perp, y] = profile[i];
+      const v = i/(M-1);
+      for(const [along, u] of [[aA,0],[aB,1]]){
+        if(axis===0) pos.push(sign*perp, y, along); else pos.push(along, y, sign*perp);
+        uv.push(u * Math.abs(aB-aA) * 0.08, v * 2);
       }
     }
-    for(let i=0;i<N;i++){ const a=i*2, b=i*2+1, c=(i+1)*2, d=(i+1)*2+1; idx.push(a,b,c, b,d,c); }
+    for(let i=0;i<M-1;i++){ const a=i*2, b=i*2+1, c=(i+1)*2, d=(i+1)*2+1; idx.push(a,b,c, b,d,c); }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
     g.setIndex(idx); g.computeVertexNormals();
-    const m = new THREE.Mesh(g, wallRampMat); m.receiveShadow = true; wallRamps.add(m);
+    const m = new THREE.Mesh(g, mat); m.receiveShadow = true; group.add(m);
   };
-  const gm = ARENA.goalHalfW + 1;
-  // ±X walls in two pieces so we don't ramp across the goal mouths
+
+  const railProfile = (half)=>[[half, WALL_R*0.86], [half, WALL_R*1.06]];
+  const gm = ARENA.goalHalfW + 0.5;
   for(const sgn of [1,-1]){
-    buildFillet(0, sgn, -ARENA.halfZ, -gm);
-    buildFillet(0, sgn,  gm,  ARENA.halfZ);
-    buildFillet(1, sgn, -ARENA.halfX, ARENA.halfX);
+    // ±X walls come in two pieces so we don't board over the goal mouths
+    for(const [a,b] of [[-ARENA.halfZ, -gm], [gm, ARENA.halfZ]]){
+      sweep(0, sgn, kickProfile(ARENA.halfX),  a, b, wallRampMat, wallRamps);
+      sweep(0, sgn, glassProfile(ARENA.halfX), a, b, glassMat,    arenaGlass);
+      sweep(0, sgn, railProfile(ARENA.halfX),  a, b, railMat,     wallRail);
+    }
+    sweep(1, sgn, kickProfile(ARENA.halfZ),  -ARENA.halfX, ARENA.halfX, wallRampMat, wallRamps);
+    sweep(1, sgn, glassProfile(ARENA.halfZ), -ARENA.halfX, ARENA.halfX, glassMat,    arenaGlass);
+    sweep(1, sgn, railProfile(ARENA.halfZ),  -ARENA.halfX, ARENA.halfX, railMat,     wallRail);
   }
+
+  // the roof ya can actually drive on, inset by the top curve
+  const roof = new THREE.Mesh(
+    new THREE.PlaneGeometry((ARENA.halfX - WALL_R)*2, (ARENA.halfZ - WALL_R)*2), glassMat);
+  roof.rotation.x = Math.PI/2; roof.position.y = ARENA.ceil;
+  arenaGlass.add(roof);
 }
 
 const plankMat = new THREE.MeshLambertMaterial({ map: barnPlankTex, side:THREE.DoubleSide });
@@ -7348,9 +7394,19 @@ function rebaseYawToFloor(c){
 // to the NEAREST point is what turns inward momentum into a climb up the curve.
 // nPerp is the inward normal along the p-axis (toward the pitch is negative p).
 function projectWall(p, y, half){
-  const cp = half - WALL_R, cy = WALL_R;       // fillet centre in (p, y)
+  const cp = half - WALL_R, cy = WALL_R;       // bottom fillet centre in (p, y)
+  const topC = ARENA.ceil - WALL_R;
+  if(y >= topC){
+    // TOP fillet: the wall curves over into the ceiling, mirroring the bottom one,
+    // so a car rolls onto the roof instead of hitting a hard corner.
+    const dp = Math.max(0, p - cp), dy = y - topC;
+    let phi = Math.atan2(dy, dp);              // 0 at the wall -> pi/2 at the ceiling
+    if(phi < 0) phi = 0; else if(phi > Math.PI/2) phi = Math.PI/2;
+    const cs = Math.cos(phi), sn = Math.sin(phi);
+    return { p: cp + WALL_R*cs, y: topC + WALL_R*sn, nPerp: -cs, nY: -sn, top: phi > Math.PI/2 - 0.02 };
+  }
   if(y >= WALL_R)                              // up on the vertical wall (height decides, not p)
-    return { p: half, y: Math.min(ARENA.wallH, y), nPerp: -1, nY: 0 };
+    return { p: half, y, nPerp: -1, nY: 0 };
   if(p <= cp)                                   // out on the floor
     return { p, y: 0, nPerp: 0, nY: 1 };
   const dp = p - cp, dy = y - cy;              // on the fillet (dy ≤ 0)
@@ -8317,12 +8373,10 @@ function updateCar(c, dt, input){
       rebaseYawToFloor(c);
       c.wallAxis = null; c.up.set(0,1,0); if(c.pos.y < 0.1) c.pos.y = 0;
     } else {
-      if(c.pos.y >= ARENA.ceil - 0.05){
-        // topped out the wall — carry on onto the ceiling, like RL
-        if(c.vel.y > WALL_STICK_MIN){
-          c.pos.y = ARENA.ceil; c.wallAxis = 2; c.wallSign = 1;
-          stickToWall(c); rebaseYawToWall(c);
-        } else { c.pos.y = ARENA.ceil - 0.05; c.vel.y = Math.min(0, c.vel.y); }
+      // rounded the top fillet onto the flat roof? hand over to the ceiling surface
+      if(c.pos.y >= ARENA.ceil - 0.02 && p <= half - WALL_R + 0.05){
+        c.pos.y = ARENA.ceil; c.wallAxis = 2; c.wallSign = 1;
+        stickToWall(c);
       }
       // keep the lateral coord inside the playfield
       const lateral = c.wallAxis===0 ? c.pos.z : c.pos.x;
