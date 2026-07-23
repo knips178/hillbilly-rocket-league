@@ -72,6 +72,38 @@ Two traps that cost real debugging time, both now fixed -- don't reintroduce:
    `relay` candidate actually comes back) and keep the waitin' room CONNECTION INFO readout
    (`remoteSDP > 0` = the devices found each other, so any failure is the peer link, not matchmaking).
 
+## Rocket League fidelity — researched values (do not "simplify" these back)
+
+Documented RL constants (RLBot wiki / GDC "It IS Rocket Science"), and how this game maps to them:
+
+| RL | value | here |
+|---|---|---|
+| gravity | 650 uu/s² | `GRAV_CAR` -34 |
+| boost accel (ground / air) | 991.7 / 1058.3 uu/s² | ground 30, `AIR_BOOST` 52 |
+| **boost direction** | **along the car's NOSE only — no vertical lift** | same |
+| jump impulse | ~291.7 uu/s along the **ROOF** (car up), not world up | same, uses `c.up` |
+| boost drain | 33.3/s | `BOOST_DRAIN` 22 |
+| supersonic / max | 2200 / 2300 uu/s | `SUPERSONIC` 46 |
+| braking vs coasting | -3500 vs -525 uu/s² | drag 1.8 vs 0.35 |
+| corner radius | ~256uu on a 4096 half-arena (~6%) | `WALL_R` 8 |
+| wall sticky force | scales with speed | `WALL_CLIMB_MIN` 24 gate |
+
+**The three bugs this fixed, and why — don't reintroduce:**
+1. **"Jump + boost flies into the ceiling."** The air branch added `vel.y += 45` against 34 gravity, so
+   holding boost climbed regardless of aim. RL has NO free lift: boost is applied along the nose. Now
+   you pitch the nose up (`c.pitch`, stick back) and *then* boost — deliberate aerials, no ceiling drift.
+2. **"Steering goes weird on the wall."** The tangent frame used world-Z as its reference, which
+   **degenerates on the ±Z walls** (Z ∥ normal) → `forward` flipped. Frame now derives from the surface:
+   `climb = worldUp − (worldUp·n)n`, `lateral = climb × n` — never degenerate on a vertical wall.
+3. **"The vehicle comes toward the camera."** Same root cause: the chase cam sits at `−forward`, so a
+   flipped forward put it in FRONT of the car. Fixed by (2).
+
+Yaw means "angle within the current surface frame", so it is re-expressed at every surface change via
+`rebaseYawToWall` / `rebaseYawToFloor` — otherwise facing snaps when ya grab or leave a wall.
+
+Harness pins all of it: nose-only boost doesn't climb, nose-up boost does, all four wall frames are
+unit + correctly oriented, and the camera stays behind and outside the wall on each.
+
 ## Curved walls / wall-riding (keep this working)
 
 Cars drive up the walls RL-style. Each wall meets the floor through a quarter-circle fillet of

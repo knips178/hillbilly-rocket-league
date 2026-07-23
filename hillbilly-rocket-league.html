@@ -5022,6 +5022,11 @@ const BOOST_DRAIN = 22;   // was 28 — turbo lasts a little longer now (full ta
 // (~6%). 16 was ~20% — a giant quarter-pipe you curved up from way too far out.
 const WALL_R = 8;             // fillet radius where wall meets floor
 const WALL_CLIMB_MIN = 24;    // speed you need, aimed into a wall, to grab it
+// RL air model: boost accel is ~1.53x gravity (991 uu/s² vs 650), applied along the
+// NOSE. Matching that ratio here means nose-up + boost climbs, nose-level + boost
+// just goes fast and you still fall — no more accidental ceiling flights.
+const AIR_BOOST = 52;         // 34 gravity x 1.53
+const AIR_PITCH_RATE = 2.6;   // rad/s of nose pitch while airborne
 const UP_Y = { x:0, y:1, z:0 };
 const CAR_COLL_R = 3.0;
 const SUPERSONIC = 46;
@@ -7238,7 +7243,7 @@ function makeCar(name, team, vehIdx, isPlayer){
     smokeT: 0, dead: 0,
     pos:new THREE.Vector3(), vel:new THREE.Vector3(), yaw:0,
     onGround:true, jumps:2, boost:33, flip:0, flipDir:0, rollVis:0, steerVis:0,
-    up:new THREE.Vector3(0,1,0), wallAxis:null, wallSign:1,   // surface normal for wall-riding
+    up:new THREE.Vector3(0,1,0), wallAxis:null, wallSign:1, pitch:0,   // surface normal + aerial nose pitch
     aiTimer:Math.random()*2, aiJumpCd:0, goals:0, touches:0, demos:0,
     specialCd:0, spinT:0, shineT:0, stewT:0, demoStreak:0, demoStreakT:0, aiSpecialCd:2+Math.random()*3,
     persona: isPlayer ? null : PERSONAS[Math.floor(Math.random()*PERSONAS.length)],
@@ -7255,18 +7260,45 @@ function makeCar(name, team, vehIdx, isPlayer){
 
 // Forward respects the surface normal, so steering/throttle work on any wall.
 // On the floor it returns exactly the old flat forward.
+// Surface tangent frame. Using world-Z as the reference DEGENERATES on the ±Z
+// walls (Z becomes parallel to the normal), which flipped `forward` — that broke
+// steering on those walls and threw the chase camera in FRONT of the car.
+// Deriving the frame from the surface itself never degenerates on a vertical wall:
+//   climb   = the up-the-wall tangent  = worldUp − (worldUp·n)n
+//   lateral = climb × n
+function wallFrame(n){
+  let cx = -n.y*n.x, cy = 1 - n.y*n.y, cz = -n.y*n.z;      // climb
+  let cl = Math.hypot(cx,cy,cz);
+  if(cl < 1e-4){ cx=0; cy=0; cz=1; cl=1; }                 // n ~ worldUp (floor): any tangent
+  cx/=cl; cy/=cl; cz/=cl;
+  return { cx, cy, cz,
+           lx: cy*n.z - cz*n.y, ly: cz*n.x - cx*n.z, lz: cx*n.y - cy*n.x };
+}
+
 function carForward(c){
   const up = c.up || UP_Y;
   const sy = Math.sin(c.yaw), cy = Math.cos(c.yaw);
-  if(up.x===0 && up.y===1 && up.z===0) return new THREE.Vector3(sy, 0, cy);
-  // tangent t = Z − (Z·up)up (fallback X near the poles); right = up × t
-  const d = up.z;
-  let tx = -d*up.x, ty = -d*up.y, tz = 1 - d*up.z;
-  let tl = Math.hypot(tx,ty,tz);
-  if(tl < 1e-4){ tx=1; ty=0; tz=0; tl=1; }
-  tx/=tl; ty/=tl; tz/=tl;
-  const rx = up.y*tz - up.z*ty, ry = up.z*tx - up.x*tz, rz = up.x*ty - up.y*tx;
-  return new THREE.Vector3(sy*rx + cy*tx, sy*ry + cy*ty, sy*rz + cy*tz);
+  if(up.x===0 && up.y===1 && up.z===0){
+    // floor / air. Pitch is the RL aerial axis: nose up, then boost to climb.
+    const p = c.pitch || 0;
+    if(!p) return new THREE.Vector3(sy, 0, cy);
+    const cp = Math.cos(p);
+    return new THREE.Vector3(sy*cp, Math.sin(p), cy*cp);
+  }
+  const F = wallFrame(up);   // forward = cos(yaw)·lateral + sin(yaw)·climb
+  return new THREE.Vector3(cy*F.lx + sy*F.cx, cy*F.ly + sy*F.cy, cy*F.lz + sy*F.cz);
+}
+
+// Yaw means "angle within the current surface frame", so it has to be re-expressed
+// when the car changes surface or its facing snaps at the transition.
+function rebaseYawToWall(c){
+  const fx = Math.sin(c.yaw), fz = Math.cos(c.yaw);        // facing, floor convention
+  const F = wallFrame(c.up);
+  c.yaw = Math.atan2(fx*F.cx + fz*F.cz, fx*F.lx + fz*F.lz);
+}
+function rebaseYawToFloor(c){
+  const f = carForward(c);
+  if(Math.abs(f.x) > 1e-5 || Math.abs(f.z) > 1e-5) c.yaw = Math.atan2(f.x, f.z);
 }
 
 // Nearest point of the {floor → fillet → wall} cross-section for a car whose
@@ -8054,8 +8086,10 @@ function tryJump(c){
   if(c.onGround){
     if(c.wallAxis !== null){
       // leap off the wall along its normal, then fall free
-      c.vel.x += c.up.x*16; c.vel.y += c.up.y*16 + 6; c.vel.z += c.up.z*16;
-      c.wallAxis = null; c.up.set(0,1,0);
+      // RL: jump impulse is along the ROOF (surface normal), not world-up.
+      c.vel.x += c.up.x*16; c.vel.y += c.up.y*16; c.vel.z += c.up.z*16;
+      rebaseYawToFloor(c);
+      c.wallAxis = null; c.up.set(0,1,0); c.pitch = 0;
     } else {
       c.vel.y = 14;
     }
@@ -8090,7 +8124,7 @@ function updateCar(c, dt, input){
       const s = pick(kickoffSpots(c.team));
       c.pos.set(s.x, 0, s.z); c.vel.set(0,0,0); c.yaw = s.yaw;
       c.boost = 33; c.onGround = true; c.jumps = 2; c.flip = 0;
-      c.wallAxis = null; c.up.set(0,1,0);
+      c.wallAxis = null; c.up.set(0,1,0); c.pitch = 0;
       c.mesh.visible = true; c.tag.visible = true;
       c.mesh.position.copy(c.pos); c.mesh.rotation.set(0, c.yaw, 0);
     }
@@ -8148,12 +8182,17 @@ function updateCar(c, dt, input){
     const s2 = Math.hypot(c.vel.x, c.vel.y, c.vel.z);
     if(s2>max){ const k=max/s2; c.vel.x*=k; c.vel.y*=k; c.vel.z*=k; }
   } else {
-    // air: gravity, slight air steer, and boost that LIFTS ya (aerials!) as well as pushes
+    // AIR — the Rocket League model. Boost accelerates ONLY along the car's nose;
+    // there is no free vertical lift. (The old code added +45/s up vs 34 gravity,
+    // so simply holding boost flew ya into the ceiling no matter where ya pointed.)
+    // To climb you pitch the nose up first, exactly like RL: pull back, then boost.
     c.vel.y += GRAV_CAR * gravCarMul * dt;
     c.yaw += input.steer * 1.6 * dt;
+    // stick back (S / reverse) = nose up, push forward (W) = nose down
+    c.pitch = THREE.MathUtils.clamp((c.pitch||0) - input.throttle * AIR_PITCH_RATE * dt, -1.25, 1.25);
     if(canBoost){
-      c.vel.x += f.x*17*dt; c.vel.z += f.z*17*dt;
-      c.vel.y += 45*dt;                                   // beats gravity (34) so holding boost CLIMBS — aerials!
+      const fa = carForward(c);                           // includes pitch
+      c.vel.x += fa.x*AIR_BOOST*dt; c.vel.y += fa.y*AIR_BOOST*dt; c.vel.z += fa.z*AIR_BOOST*dt;
       if(!freeB) c.boost = Math.max(0, c.boost - BOOST_DRAIN*dt);
     }
   }
@@ -8169,6 +8208,7 @@ function updateCar(c, dt, input){
     const openMouth = c.wallAxis===0 && Math.abs(c.pos.z) < ARENA.goalHalfW;
     if(p <= half - WALL_R - 0.5 || openMouth){
       // rolled back off the fillet onto the floor (or hit a goal opening) — let go
+      rebaseYawToFloor(c);
       c.wallAxis = null; c.up.set(0,1,0); if(c.pos.y < 0.1) c.pos.y = 0;
     } else {
       if(c.pos.y >= ARENA.wallH){ c.pos.y = ARENA.wallH; c.vel.y = Math.min(0, c.vel.y); }
@@ -8190,7 +8230,7 @@ function updateCar(c, dt, input){
             Math.cos(a)*(4+Math.random()*7), 1+Math.random()*3, Math.sin(a)*(4+Math.random()*7),
             Math.random()<0.7?0x9a7a52:0x6a4a28, 0.5+Math.random()*0.35, 0.7+Math.random()*0.6); }
       }
-      c.pos.y = 0; c.vel.y = 0; c.up.set(0,1,0);
+      c.pos.y = 0; c.vel.y = 0; c.up.set(0,1,0); c.pitch = 0;
       if(!c.onGround){ c.onGround = true; c.jumps = 2; c.flip = 0; }
     } else if (c.pos.y > 0.05){
       c.onGround = false;
@@ -8208,7 +8248,7 @@ function updateCar(c, dt, input){
         if(ARENA.halfZ - c.pos.z < WALL_R && c.vel.z >  WALL_CLIMB_MIN){ c.wallAxis=1; c.wallSign= 1; }
         else if(ARENA.halfZ + c.pos.z < WALL_R && c.vel.z < -WALL_CLIMB_MIN){ c.wallAxis=1; c.wallSign=-1; }
       }
-      if(c.wallAxis !== null){ stickToWall(c); }
+      if(c.wallAxis !== null){ stickToWall(c); rebaseYawToWall(c); c.pitch = 0; }
     }
 
     // hard walls for cars that AREN'T climbing (slow bumps still stop, as before)
@@ -8312,7 +8352,7 @@ function updateCar(c, dt, input){
     const t = 1 - c.flip/0.55;
     c.mesh.rotateX(c.flipDir * t * Math.PI*2);
   } else if(!c.onGround){
-    c.mesh.rotateX(-0.15);
+    c.mesh.rotateX(-(c.pitch || 0) - 0.06);   // nose follows the aerial pitch ya steer
   }
   const anim = c.mesh.userData.anim;
   if(anim){ if(anim.kind==='cow') animateCow(anim, c, dt); else if(anim.kind==='cowmodel') updateCowModel(anim, c, dt); }

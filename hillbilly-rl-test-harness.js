@@ -108,8 +108,8 @@ Object.defineProperty(global, 'navigator', { value: { getGamepads: ()=>[fakePad]
 // ---- load game ----
 const fs=require('fs');
 const src=fs.readFileSync('/tmp/game.js','utf8');
-eval(src + '\n;global.__G={startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,ARENA,WALL_R,BOOST_DRAIN};');
-const {startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,ARENA,WALL_R,BOOST_DRAIN} = global.__G;
+eval(src + '\n;global.__G={startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,carForward,updateCamera,ARENA,WALL_R,BOOST_DRAIN};');
+const {startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,carForward,updateCamera,ARENA,WALL_R,BOOST_DRAIN} = global.__G;
 
 // ---- simulate ----
 function frame(){ const fn=rafQueue.shift(); if(fn) fn(); while(pendingTimeouts.length) pendingTimeouts.shift()(); }
@@ -368,8 +368,60 @@ wc.pos.set(ARENA.halfX - 2, 0, 0); wc.vel.set(70,0,0); wc.wallAxis=null; wc.up.s
 for(let i=0;i<20;i++) updateCar(wc, 1/60, {throttle:1,steer:0,boost:true});
 if(wc.wallAxis===0 && Math.abs(wc.pos.z) < ARENA.goalHalfW) throw new Error('car climbed the goal-mouth opening');
 
+// --- RL air model: boost follows the NOSE, no free lift ---
+// Regression: holding boost with a level nose used to fly ya into the ceiling.
+wc.pos.set(0, 12, 0); wc.vel.set(0,0,0); wc.onGround=false; wc.wallAxis=null;
+wc.up.set(0,1,0); wc.pitch=0; wc.yaw=0; wc.boost=100;
+for(let i=0;i<60*3;i++) updateCar(wc, 1/60, {throttle:0,steer:0,boost:true});
+if(wc.pos.y > 12) throw new Error('level-nose boost still climbs (y='+wc.pos.y.toFixed(1)+') — should fall');
+
+// ...but pitch the nose up first and it climbs, exactly like RL
+wc.pos.set(0, 6, 0); wc.vel.set(0,0,0); wc.onGround=false; wc.wallAxis=null;
+wc.up.set(0,1,0); wc.pitch=0; wc.yaw=0; wc.boost=100;
+for(let i=0;i<60*2;i++) updateCar(wc, 1/60, {throttle:-1,steer:0,boost:true});  // stick back = nose up
+if(wc.pitch <= 0.3) throw new Error('pulling back did not pitch the nose up (pitch='+wc.pitch.toFixed(2)+')');
+if(wc.pos.y <= 6) throw new Error('nose-up boost did not climb (y='+wc.pos.y.toFixed(1)+')');
+
+// --- surface frame must not degenerate on the Z walls ---
+// Regression: the old world-Z reference collapsed there, flipping `forward`,
+// which broke steering AND threw the chase camera in front of the car.
+for(const [ax, sg] of [[0,1],[0,-1],[1,1],[1,-1]]){
+  wc.wallAxis=ax; wc.wallSign=sg; wc.pos.set(ax===0?sg*80:10, 10, ax===0?25:sg*50);
+  wc.vel.set(0,0,0); wc.yaw=0; stickToWall(wc);
+  const upLen = Math.hypot(wc.up.x, wc.up.y, wc.up.z);
+  if(Math.abs(upLen-1) > 0.01) throw new Error('wall '+ax+'/'+sg+': normal not unit ('+upLen.toFixed(3)+')');
+  // yaw=0 must mean "along the wall", yaw=pi/2 must mean "straight up it"
+  wc.yaw = Math.PI/2; const climb = carForward(wc);
+  if(climb.y < 0.95) throw new Error('wall '+ax+'/'+sg+': yaw=pi/2 is not straight up the wall (fy='+climb.y.toFixed(2)+')');
+  wc.yaw = 0; const along = carForward(wc);
+  if(Math.abs(along.y) > 0.05) throw new Error('wall '+ax+'/'+sg+': yaw=0 should run along the wall, not up it');
+  const alen = Math.hypot(along.x, along.y, along.z);
+  if(Math.abs(alen-1) > 0.01) throw new Error('wall '+ax+'/'+sg+': forward not unit ('+alen.toFixed(3)+')');
+}
+wc.wallAxis=null; wc.up.set(0,1,0); wc.pitch=0;
+
+// --- chase camera must stay BEHIND the car on every wall ---
+// Regression: the flipped frame put the camera in FRONT, so the car drove at you.
+for(const [ax, sg] of [[0,1],[0,-1],[1,1],[1,-1]]){
+  const pl = game.player;
+  pl.wallAxis=ax; pl.wallSign=sg; pl.pitch=0;
+  pl.pos.set(ax===0?sg*80:10, 12, ax===0?25:sg*50);
+  pl.vel.set(0,0,0); pl.yaw=Math.PI/2;           // climbing straight up
+  stickToWall(pl);
+  camPos.copy(pl.pos);                            // start on top of the car, let it settle
+  for(let i=0;i<240;i++) updateCamera(1/60);
+  const fwd = carForward(pl);
+  const toCam = { x: camPos.x-pl.pos.x, y: camPos.y-pl.pos.y, z: camPos.z-pl.pos.z };
+  const behind = toCam.x*fwd.x + toCam.y*fwd.y + toCam.z*fwd.z;
+  if(behind >= 0) throw new Error('wall '+ax+'/'+sg+': camera sits IN FRONT of the car (dot='+behind.toFixed(1)+')');
+  const off = toCam.x*pl.up.x + toCam.y*pl.up.y + toCam.z*pl.up.z;
+  if(off <= 0) throw new Error('wall '+ax+'/'+sg+': camera is inside the wall (off='+off.toFixed(1)+')');
+}
+game.player.wallAxis=null; game.player.up.set(0,1,0); game.player.pitch=0;
+
 // boost lasts longer now
 if(BOOST_DRAIN >= 28) throw new Error('boost drain was not reduced');
 console.log('curved walls OK — climb, descend, jump-off, goal-mouth guard; boost drain '+BOOST_DRAIN);
+console.log('RL air+surface OK — nose-only boost, aerial pitch, 4 wall frames, camera stays behind');
 
 console.log('ALL TESTS PASSED');
