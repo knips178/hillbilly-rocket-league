@@ -6176,71 +6176,150 @@ scene.add(barnShell);
 // One continuous surface: floor -> curved kick-plate -> boards -> curved top ->
 // roof, generated from the SAME cross-section the physics uses (projectWall), so
 // what ya drive on is exactly what ya see. No seams, no invisible walls.
-// Themed like a barn rink: solid timber kick-plates down low, scratched-up
-// plexiglass boards above so the hay bales and crowd still show through.
-const wallRamps = new THREE.Group();          // kick-plates (opaque)
-const arenaGlass = new THREE.Group();         // boards + roof (see-through)
-const wallRail  = new THREE.Group();          // painted rail capping the kick-plates
-let wallRampMat = null, glassMat = null, railMat = null;
-scene.add(wallRamps); scene.add(arenaGlass); scene.add(wallRail);
+// Dressed like a barn rink: weathered timber kick-plates scuffed up by years of
+// mower paint, a painted rail, plexiglass boards ya can see the crowd through,
+// and posts holdin' the whole thing together.
+const wallRamps  = new THREE.Group();   // kick-plates (opaque, textured)
+const arenaGlass = new THREE.Group();   // boards + roof (see-through)
+const wallRail   = new THREE.Group();   // painted rail + top trim + posts
+const wallShade  = new THREE.Group();   // contact shadow seating the curve into the pitch
+let wallRampMat = null, glassMat = null, railMat = null, postMat = null;
+scene.add(wallRamps); scene.add(arenaGlass); scene.add(wallRail); scene.add(wallShade);
+
+// Weathered board texture: vertical planks, grain, nail heads, and the scuffs a
+// few thousand mower bumpers leave along the bottom.
+const boardTex = makeCanvasTex(512, 256, (g,w,h)=>{
+  g.fillStyle='#8a6636'; g.fillRect(0,0,w,h);
+  for(let x=0;x<w;x+=32){                                  // plank seams + tone variation
+    const shade = 0.82 + Math.random()*0.30;
+    g.fillStyle = 'rgba('+Math.round(138*shade)+','+Math.round(102*shade)+','+Math.round(54*shade)+',1)';
+    g.fillRect(x, 0, 30, h);
+    g.strokeStyle='rgba(48,32,14,0.55)'; g.lineWidth=2;
+    g.beginPath(); g.moveTo(x+31,0); g.lineTo(x+31,h); g.stroke();
+    for(let k=0;k<5;k++){                                   // grain
+      g.strokeStyle='rgba(70,48,22,'+(0.10+Math.random()*0.16)+')'; g.lineWidth=1;
+      const gx = x+3+Math.random()*24;
+      g.beginPath(); g.moveTo(gx,0);
+      g.bezierCurveTo(gx+4,h*0.33, gx-4,h*0.66, gx+2,h); g.stroke();
+    }
+    g.fillStyle='rgba(40,30,18,0.7)';                       // nail heads
+    g.beginPath(); g.arc(x+8, 14, 2.2, 0, 7); g.fill();
+    g.beginPath(); g.arc(x+24, h-14, 2.2, 0, 7); g.fill();
+  }
+  for(let i=0;i<26;i++){                                    // paint scuffs along the bottom
+    const sx=Math.random()*w, sy=h*0.55+Math.random()*h*0.45;
+    g.strokeStyle='rgba('+[220,190,90][i%3]+','+[210,200,140][i%3]+',200,'+(0.05+Math.random()*0.14)+')';
+    g.lineWidth=1+Math.random()*3;
+    g.beginPath(); g.moveTo(sx,sy); g.lineTo(sx+8+Math.random()*40, sy+(Math.random()-0.5)*7); g.stroke();
+  }
+});
+// soft contact shadow: dark where it meets the boards, gone a few feet out
+const shadeTex = makeCanvasTex(8, 64, (g,w,h)=>{
+  const grd=g.createLinearGradient(0,0,0,h);
+  grd.addColorStop(0,'rgba(0,0,0,0.55)'); grd.addColorStop(0.55,'rgba(0,0,0,0.16)');
+  grd.addColorStop(1,'rgba(0,0,0,0)');
+  g.fillStyle=grd; g.fillRect(0,0,w,h);
+});
 
 if(typeof THREE.BufferGeometry === 'function' && typeof THREE.Float32BufferAttribute === 'function'){
-  wallRampMat = new THREE.MeshLambertMaterial({ color:0x6a5a3a, side:THREE.DoubleSide });
-  glassMat = new THREE.MeshLambertMaterial({ color:0xbfd6d0, transparent:true, opacity:0.16,
+  if(boardTex.wrapS !== undefined){ boardTex.wrapS = boardTex.wrapT = THREE.RepeatWrapping; }
+  wallRampMat = new THREE.MeshLambertMaterial({ map:boardTex, color:0xb59a68, side:THREE.DoubleSide });
+  glassMat = new THREE.MeshLambertMaterial({ color:0xbfd6d0, transparent:true, opacity:0.15,
                                              side:THREE.DoubleSide, depthWrite:false });
   railMat  = new THREE.MeshLambertMaterial({ color:0xd8a53a, emissive:0x3a2405, side:THREE.DoubleSide });
+  postMat  = new THREE.MeshLambertMaterial({ color:0x5a4322 });
+  const shadeMat = new THREE.MeshBasicMaterial({ map:shadeTex, transparent:true, opacity:0.85,
+                                                 depthWrite:false, side:THREE.DoubleSide });
 
-  // Cross-section of the shell, from the pitch edge up and over. `perp` is the
-  // distance out toward the wall plane; y is height. Matches projectWall exactly.
-  const R = WALL_R, CH = ARENA.ceil, topC = CH - R;
-  const kickProfile = (half)=>{                       // floor -> top of the bottom curve
-    const pts = [], N = 10;
-    for(let i=0;i<=N;i++){ const t=(i/N)*(Math.PI/2);
+  // Cross-section, from the pitch edge up and over. Matches projectWall exactly.
+  // Tessellated finer than before so the curves read smooth, not faceted.
+  const R = WALL_R, CH = ARENA.ceil, topC = CH - R, NSEG = 22;
+  const kickProfile = (half)=>{
+    const pts = [];
+    for(let i=0;i<=NSEG;i++){ const t=(i/NSEG)*(Math.PI/2);
       pts.push([half - R + R*Math.sin(t), R - R*Math.cos(t)]); }
     return pts;
   };
-  const glassProfile = (half)=>{                      // boards, then over the top curve
-    const pts = [], N = 10;
-    pts.push([half, R]);
-    pts.push([half, topC]);
-    for(let i=1;i<=N;i++){ const t=(i/N)*(Math.PI/2);
+  const glassProfile = (half)=>{
+    const pts = [[half, R], [half, topC]];
+    for(let i=1;i<=NSEG;i++){ const t=(i/NSEG)*(Math.PI/2);
       pts.push([half - R + R*Math.cos(t), topC + R*Math.sin(t)]); }
     return pts;
   };
+  const railProfile = (half)=>[[half, R*0.86], [half, R*1.06]];
 
-  // Sweep a cross-section along a wall. axis 0 = the ±X walls (swept in z),
-  // axis 1 = the ±Z walls (swept in x).
-  const sweep = (axis, sign, profile, aA, aB, mat, group)=>{
+  // Sweep a cross-section along a wall. axis 0 = ±X walls (swept in z), 1 = ±Z (in x).
+  // uvScale tiles the timber so planks stay a consistent size on every wall.
+  const sweep = (axis, sign, profile, aA, aB, mat, group, uvScale)=>{
     const pos = [], idx = [], uv = [];
-    const M = profile.length;
+    const M = profile.length, span = Math.abs(aB-aA);
+    // arc length along the profile keeps the texture from stretching round the curve
+    let run = 0; const runs = [0];
+    for(let i=1;i<M;i++){
+      run += Math.hypot(profile[i][0]-profile[i-1][0], profile[i][1]-profile[i-1][1]);
+      runs.push(run);
+    }
     for(let i=0;i<M;i++){
       const [perp, y] = profile[i];
-      const v = i/(M-1);
       for(const [along, u] of [[aA,0],[aB,1]]){
         if(axis===0) pos.push(sign*perp, y, along); else pos.push(along, y, sign*perp);
-        uv.push(u * Math.abs(aB-aA) * 0.08, v * 2);
+        uv.push(u * span * (uvScale||0.08), runs[i] * (uvScale||0.08) * 2.2);
       }
     }
     for(let i=0;i<M-1;i++){ const a=i*2, b=i*2+1, c=(i+1)*2, d=(i+1)*2+1; idx.push(a,b,c, b,d,c); }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-    g.setIndex(idx); g.computeVertexNormals();
+    g.setIndex(idx); g.computeVertexNormals();               // shared verts => smooth shading
     const m = new THREE.Mesh(g, mat); m.receiveShadow = true; group.add(m);
   };
 
-  const railProfile = (half)=>[[half, WALL_R*0.86], [half, WALL_R*1.06]];
+  // timber posts every so often, tucked just outside the glass
+  const addPosts = (axis, sign, aA, aB)=>{
+    // spacing chosen to keep the rhythm without spraying draw calls (see AGENTS.md perf note)
+    const span = Math.abs(aB - aA), n = Math.max(2, Math.round(span / uu(1150)));
+    for(let i=0;i<=n;i++){
+      const along = aA + (aB-aA) * (i/n);
+      const post = new THREE.Mesh(new THREE.BoxGeometry(uu(34), topC - R*0.9, uu(34)), postMat);
+      const perp = (axis===0 ? ARENA.halfX : ARENA.halfZ) + uu(14);
+      post.position.set(axis===0 ? sign*perp : along, (topC + R*0.9)/2, axis===0 ? along : sign*perp);
+      wallRail.add(post);
+    }
+  };
+
+  // contact shadow on the pitch, hugging the base of the curve
+  const addShade = (axis, sign, aA, aB)=>{
+    const half = axis===0 ? ARENA.halfX : ARENA.halfZ;
+    const depth = R*1.5;
+    const geo = new THREE.PlaneGeometry(Math.abs(aB-aA), depth);
+    const m = new THREE.Mesh(geo, shadeMat);
+    m.rotation.x = -Math.PI/2;
+    if(axis===0){ m.position.set(sign*(half - R - depth/2 + R*0.5), 0.03, (aA+aB)/2); m.rotation.z = Math.PI/2; }
+    else        { m.position.set((aA+aB)/2, 0.03, sign*(half - R - depth/2 + R*0.5)); }
+    if(sign < 0) m.rotation.z += Math.PI;
+    wallShade.add(m);
+  };
+
   const gm = ARENA.goalHalfW + 0.5;
   for(const sgn of [1,-1]){
-    // ±X walls come in two pieces so we don't board over the goal mouths
     for(const [a,b] of [[-ARENA.halfZ, -gm], [gm, ARENA.halfZ]]){
-      sweep(0, sgn, kickProfile(ARENA.halfX),  a, b, wallRampMat, wallRamps);
+      sweep(0, sgn, kickProfile(ARENA.halfX),  a, b, wallRampMat, wallRamps, 0.09);
       sweep(0, sgn, glassProfile(ARENA.halfX), a, b, glassMat,    arenaGlass);
       sweep(0, sgn, railProfile(ARENA.halfX),  a, b, railMat,     wallRail);
+      addPosts(0, sgn, a, b); addShade(0, sgn, a, b);
     }
-    sweep(1, sgn, kickProfile(ARENA.halfZ),  -ARENA.halfX, ARENA.halfX, wallRampMat, wallRamps);
+    sweep(1, sgn, kickProfile(ARENA.halfZ),  -ARENA.halfX, ARENA.halfX, wallRampMat, wallRamps, 0.09);
     sweep(1, sgn, glassProfile(ARENA.halfZ), -ARENA.halfX, ARENA.halfX, glassMat,    arenaGlass);
     sweep(1, sgn, railProfile(ARENA.halfZ),  -ARENA.halfX, ARENA.halfX, railMat,     wallRail);
+    addPosts(1, sgn, -ARENA.halfX, ARENA.halfX); addShade(1, sgn, -ARENA.halfX, ARENA.halfX);
+  }
+
+  // trim beam capping the top curve where it turns into the roof
+  for(const sgn of [1,-1]){
+    const bx = new THREE.Mesh(new THREE.BoxGeometry(uu(34), uu(34), (ARENA.halfZ-R)*2), postMat);
+    bx.position.set(sgn*(ARENA.halfX - R), CH - uu(20), 0); wallRail.add(bx);
+    const bz = new THREE.Mesh(new THREE.BoxGeometry((ARENA.halfX-R)*2, uu(34), uu(34)), postMat);
+    bz.position.set(0, CH - uu(20), sgn*(ARENA.halfZ - R)); wallRail.add(bz);
   }
 
   // the roof ya can actually drive on, inset by the top curve
