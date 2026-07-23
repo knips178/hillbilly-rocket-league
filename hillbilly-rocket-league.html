@@ -5027,6 +5027,16 @@ const WALL_CLIMB_MIN = 24;    // speed you need, aimed into a wall, to grab it
 // just goes fast and you still fall — no more accidental ceiling flights.
 const AIR_BOOST = 52;         // 34 gravity x 1.53
 const AIR_PITCH_RATE = 2.6;   // rad/s of nose pitch while airborne
+// RL throttle accel is velocity-dependent (~1600 uu/s² at rest, tapering to 0 at
+// 1410) — that's the punchy launch and soft top end. Braking (opposite throttle)
+// is -3500 vs -525 coasting, i.e. ~6.7x.
+const ACCEL_PEAK = 1.7;       // multiplier at a standstill, tapering to 0 at top speed
+const BRAKE_DRAG = 6.5;       // opposite-throttle braking vs 1.8 coast / 0.35 rolling
+// RL sticky force (325 uu/s²) is HALF gravity (650): too slow on a steep wall and
+// ya peel off. Community rule of thumb is ~300 uu/s to stay stuck.
+const WALL_STICK_MIN = 9;     // below this, a steep wall lets go of ya
+const JUMP_HOLD_T = 0.2;      // RL holds the jump for a taller hop (1460 uu/s²)
+const JUMP_HOLD_ACC = 26;
 const UP_Y = { x:0, y:1, z:0 };
 const CAR_COLL_R = 3.0;
 const SUPERSONIC = 46;
@@ -7243,7 +7253,7 @@ function makeCar(name, team, vehIdx, isPlayer){
     smokeT: 0, dead: 0,
     pos:new THREE.Vector3(), vel:new THREE.Vector3(), yaw:0,
     onGround:true, jumps:2, boost:33, flip:0, flipDir:0, rollVis:0, steerVis:0,
-    up:new THREE.Vector3(0,1,0), wallAxis:null, wallSign:1, pitch:0,   // surface normal + aerial nose pitch
+    up:new THREE.Vector3(0,1,0), wallAxis:null, wallSign:1, pitch:0, jumpHoldT:0, jumpN:null,   // surface normal + aerial nose pitch
     aiTimer:Math.random()*2, aiJumpCd:0, goals:0, touches:0, demos:0,
     specialCd:0, spinT:0, shineT:0, stewT:0, demoStreak:0, demoStreakT:0, aiSpecialCd:2+Math.random()*3,
     persona: isPlayer ? null : PERSONAS[Math.floor(Math.random()*PERSONAS.length)],
@@ -8055,7 +8065,7 @@ function pollPad(){
     steer: -dzone(gp.axes[0] || 0),
     throttle: (b[7] ? b[7].value : 0) - (b[6] ? b[6].value : 0),   // R2 gas, L2 reverse
     boost: pressed(1) || pressed(5),                                // ◯ or R1
-    jumpEdge: edge(0),                                              // ✕
+    jumpEdge: edge(0), jumpHeld: b[0] && b[0].pressed,              // ✕
     camEdge: edge(3),                                               // △
     specialEdge: edge(2),                                           // ▢ — signature move
     pauseEdge: edge(9),                                             // OPTIONS
@@ -8084,9 +8094,12 @@ if(typeof navigator!=='undefined') addEventListener('gamepadconnected', ()=>{
 function tryJump(c){
   if(game.paused) return;
   if(c.onGround){
+    // RL: the impulse is along the ROOF (surface normal), not world-up, and holding
+    // the button keeps pushing for up to 0.2s — that's the variable hop height.
+    c.jumpN = { x:c.up.x, y:c.up.y, z:c.up.z };
+    c.jumpHoldT = JUMP_HOLD_T;
     if(c.wallAxis !== null){
       // leap off the wall along its normal, then fall free
-      // RL: jump impulse is along the ROOF (surface normal), not world-up.
       c.vel.x += c.up.x*16; c.vel.y += c.up.y*16; c.vel.z += c.up.z*16;
       rebaseYawToFloor(c);
       c.wallAxis = null; c.up.set(0,1,0); c.pitch = 0;
@@ -8153,9 +8166,15 @@ function updateCar(c, dt, input){
     let throttle = input.throttle;
     const fwdSpeed = c.vel.dot(f);
     let max = v.top * topM + (canBoost ? 16 : 0);
-    c.vel.x += f.x * v.accel * SURF.accel * throttle * dt;
-    c.vel.y += f.y * v.accel * SURF.accel * throttle * dt;
-    c.vel.z += f.z * v.accel * SURF.accel * throttle * dt;
+    // RL accel curve: hardest off the line, fading to nothing at the THROTTLE-only
+    // top speed (RL: 1600 uu/s² at rest -> 0 at 1410). Past that, boost alone carries
+    // ya to the cap — which is exactly why boost matters at speed.
+    const driveMax = Math.max(1, v.top * topM);
+    const accelFade = Math.max(0, 1 - Math.abs(fwdSpeed) / driveMax);
+    const acc = v.accel * SURF.accel * throttle * ACCEL_PEAK * accelFade;
+    c.vel.x += f.x * acc * dt;
+    c.vel.y += f.y * acc * dt;
+    c.vel.z += f.z * acc * dt;
     if(canBoost){
       c.vel.x += f.x*30*dt; c.vel.y += f.y*30*dt; c.vel.z += f.z*30*dt;
       if(!freeB) c.boost = Math.max(0, c.boost - BOOST_DRAIN*dt);
@@ -8175,7 +8194,9 @@ function updateCar(c, dt, input){
     c.vel.sub(latV.multiplyScalar(Math.min(1, 9*SURF.grip*gripMul*dt)));
     // rolling drag + no-throttle brake (a lifted throttle barely slows ya on ice)
     const eGrip = SURF.grip * gripMul;
-    const drag = (throttle===0 ? 1.8 : 0.35) * (eGrip < 1 ? eGrip*2 : 1);
+    // braking is throttle held AGAINST the way yer already travelling
+    const braking = throttle !== 0 && fwdSpeed * throttle < -0.01;
+    const drag = (braking ? BRAKE_DRAG : (throttle===0 ? 1.8 : 0.35)) * (eGrip < 1 ? eGrip*2 : 1);
     c.vel.x -= c.vel.x*drag*dt; c.vel.z -= c.vel.z*drag*dt;
     if(attached) c.vel.y -= c.vel.y*drag*dt;
     // clamp (3D so climbing speed counts too)
@@ -8187,6 +8208,15 @@ function updateCar(c, dt, input){
     // so simply holding boost flew ya into the ceiling no matter where ya pointed.)
     // To climb you pitch the nose up first, exactly like RL: pull back, then boost.
     c.vel.y += GRAV_CAR * gravCarMul * dt;
+    // held-jump bonus: keeps pushing along the surface ya left, briefly
+    if(c.jumpHoldT > 0){
+      c.jumpHoldT -= dt;
+      if(input.jumpHeld && c.jumpN){
+        c.vel.x += c.jumpN.x*JUMP_HOLD_ACC*dt;
+        c.vel.y += c.jumpN.y*JUMP_HOLD_ACC*dt;
+        c.vel.z += c.jumpN.z*JUMP_HOLD_ACC*dt;
+      } else c.jumpHoldT = 0;                          // let go = short hop
+    }
     c.yaw += input.steer * 1.6 * dt;
     // stick back (S / reverse) = nose up, push forward (W) = nose down
     c.pitch = THREE.MathUtils.clamp((c.pitch||0) - input.throttle * AIR_PITCH_RATE * dt, -1.25, 1.25);
@@ -8203,6 +8233,14 @@ function updateCar(c, dt, input){
 
   if(attached){
     // ---- riding a wall ----
+    // RL's sticky force (325 uu/s²) is only HALF gravity (650) — dawdle on a steep
+    // wall and ya peel off and fall. Rule of thumb is ~300 uu/s to stay stuck.
+    const steep = 1 - Math.abs(c.up.y);                 // 0 on the floor, 1 on a vertical wall
+    if(steep > 0.35 && Math.hypot(c.vel.x, c.vel.y, c.vel.z) < WALL_STICK_MIN){
+      rebaseYawToFloor(c);
+      c.wallAxis = null; c.up.set(0,1,0); c.onGround = false;
+      c.jumps = Math.max(c.jumps, 1);                   // RL: peeling off keeps yer flip
+    } else {
     const half = c.wallAxis===0 ? ARENA.halfX : ARENA.halfZ;
     const p = c.wallSign * (c.wallAxis===0 ? c.pos.x : c.pos.z);   // distance toward the wall
     const openMouth = c.wallAxis===0 && Math.abs(c.pos.z) < ARENA.goalHalfW;
@@ -8218,6 +8256,7 @@ function updateCar(c, dt, input){
       if(lateral >  latMax){ if(c.wallAxis===0) c.pos.z= latMax; else c.pos.x= latMax; }
       if(lateral < -latMax){ if(c.wallAxis===0) c.pos.z=-latMax; else c.pos.x=-latMax; }
       stickToWall(c);
+    }
     }
   } else {
     // ---- floor / air ----
@@ -9767,6 +9806,13 @@ document.getElementById('wr-copy').onclick = ()=>{
 // RL defaults: distance 270uu, height 110uu, angle -3°, stiffness ~0.45, smoothed swivel.
 // Our car ≈ 7 units vs RL 118uu → scale ≈ 0.06: distance ≈ 16-21, height ≈ 6.6-8.
 const CAM_DIST = 20, CAM_HEIGHT = 7.6;
+// RL "stiffness": the boom lengthens as ya speed up so the camera falls behind —
+// the spec calls this the primary speed feedback. ~25% longer flat out.
+const CAM_ZOOM = 5.0;
+function camBoom(p){
+  const sp = Math.hypot(p.vel.x, p.vel.y, p.vel.z);
+  return CAM_DIST + CAM_ZOOM * THREE.MathUtils.clamp(sp / SUPERSONIC, 0, 1);
+}
 const camPos = new THREE.Vector3(0,40,90);
 const camLook = new THREE.Vector3(0,0,0);
 function updateCamera(dt){
@@ -9782,7 +9828,7 @@ function updateCamera(dt){
     const n = p.up;                                   // surface normal, pointing into the pitch
     const fwd = carForward(p);                        // up / along the wall
     want = p.pos.clone()
-      .addScaledVector(fwd, -CAM_DIST*0.65)           // drop behind the car along the wall
+      .addScaledVector(fwd, -camBoom(p)*0.65)         // drop behind the car along the wall
       .addScaledVector(n, CAM_HEIGHT + 5);            // and pull off the wall into the arena
     // don't let it sink through the floor or punch the ceiling
     want.y = THREE.MathUtils.clamp(want.y, 2.5, ARENA.ceil - 3);
@@ -9808,12 +9854,12 @@ function updateCamera(dt){
     const dir = p.pos.clone().sub(ball.pos); dir.y = 0;
     if(dir.lengthSq()<0.01) dir.set(0,0,1);
     dir.normalize();
-    want = p.pos.clone().addScaledVector(dir, CAM_DIST);
+    want = p.pos.clone().addScaledVector(dir, camBoom(p));
     want.y = p.pos.y + CAM_HEIGHT;
     lookTarget = ball.pos.clone();
   } else {
     const f = carForward(p);
-    want = p.pos.clone().addScaledVector(f, -CAM_DIST);
+    want = p.pos.clone().addScaledVector(f, -camBoom(p));
     want.y = p.pos.y + CAM_HEIGHT;
     lookTarget = p.pos.clone().addScaledVector(f, 18); lookTarget.y += 2;
   }
@@ -9983,10 +10029,12 @@ function animate(){
       if(keys['KeyA']||keys['ArrowLeft']) pin.steer += 1;
       if(keys['KeyD']||keys['ArrowRight']) pin.steer -= 1;
       pin.boost = !!(keys['ShiftLeft']||keys['ShiftRight']);
+      pin.jumpHeld = !!keys['Space'];
       if(pad){ // merge controller input
         pin.throttle = THREE.MathUtils.clamp(pin.throttle + pad.throttle, -1, 1);
         pin.steer    = THREE.MathUtils.clamp(pin.steer + pad.steer, -1, 1);
         pin.boost    = pin.boost || pad.boost;
+        pin.jumpHeld = pin.jumpHeld || pad.jumpHeld;
       }
       if(TOUCH.on){ // merge touch stick
         pin.throttle = THREE.MathUtils.clamp(pin.throttle + TOUCH.throttle, -1, 1);

@@ -88,6 +88,23 @@ Documented RL constants (RLBot wiki / GDC "It IS Rocket Science"), and how this 
 | corner radius | ~256uu on a 4096 half-arena (~6%) | `WALL_R` 8 |
 | wall sticky force | scales with speed | `WALL_CLIMB_MIN` 24 gate |
 
+**From the RL mechanics spec (`ROCKET LEAGUE MECHANICS SPEC.md`), now implemented:**
+- **Throttle accel is velocity-dependent** (RL 1600 uu/s² at rest → 0 at 1410): `ACCEL_PEAK` 1.7 ×
+  `(1 − |fwdSpeed| / driveMax)`. Fade is against the THROTTLE-only max, so boost still carries ya
+  past it — that's why boost matters at speed. Measured: 21.3 at 0.5s, boosted top 60.
+- **Braking is opposite-throttle**, not just coasting (RL -3500 vs -525): `BRAKE_DRAG` 6.5 vs 1.8/0.35.
+- **Wall sticky force is weaker than gravity** (325 vs 650): a car slower than `WALL_STICK_MIN` on a
+  steep wall PEELS OFF and falls, and keeps its flip. Wall-riding is no longer a permanent magnet —
+  ya have to carry speed, same as RL.
+- **Held jump = taller hop** (RL: +1460 uu/s² for up to 0.2s): `JUMP_HOLD_T` / `JUMP_HOLD_ACC`, pushed
+  along the surface normal ya left (`c.jumpN`). Releasing early gives a short hop.
+- **Camera speed-zoom**: the boom lengthens with speed (`camBoom()`), which the spec calls the primary
+  speed feedback. Applied to all three camera paths (ball-cam, car-cam, wall-cam).
+- Already matched before the spec landed: ball hit-assist impulse along car→ball, world-up camera lock,
+  FOV ~110h, boom 270uu / height 100uu / angle -3° at this game's scale.
+- Deliberately NOT ported: absolute uu constants (this arena is not geometrically similar to RL — the
+  cars and ball are oversized for comedy), powerslide, ceiling driving, flip-window timer.
+
 **The three bugs this fixed, and why — don't reintroduce:**
 1. **"Jump + boost flies into the ceiling."** The air branch added `vel.y += 45` against 34 gravity, so
    holding boost climbed regardless of aim. RL has NO free lift: boost is applied along the nose. Now

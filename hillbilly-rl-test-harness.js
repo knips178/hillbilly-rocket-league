@@ -345,13 +345,25 @@ if(Math.abs(wc.pos.y) > 0.001) throw new Error('flat driving lifted off the floo
 
 // aimed into the +X wall at speed, it should climb: y rises and up tilts off +Y
 wc.pos.set(ARENA.halfX - WALL_R + 1, 0, 30); wc.vel.set(60,0,0); wc.yaw=Math.PI/2; wc.wallAxis=null; wc.up.set(0,1,0);
-for(let i=0;i<40;i++) updateCar(wc, 1/60, {throttle:1,steer:0,boost:true});
-if(wc.wallAxis !== 0) throw new Error('car did not grab the +X wall');
-if(wc.pos.y < 3) throw new Error('car did not climb the wall: y='+wc.pos.y.toFixed(1));
-if(wc.up.y > 0.98) throw new Error('body did not tilt onto the wall: up.y='+wc.up.y.toFixed(2));
-if(wc.pos.x > ARENA.halfX + 0.5) throw new Error('car punched through the wall: x='+wc.pos.x.toFixed(1));
+// sample mid-climb: with the RL-size fillet the car tops out fast, and topping out
+// legitimately ends in a peel-off (see below), so don't assert after it's done.
+let climbedTo = 0, wasOnWall = false, minUpY = 1, maxX = 0;
+for(let i=0;i<40;i++){ wc.boost=100; updateCar(wc, 1/60, {throttle:1,steer:0,boost:true});
+  if(wc.wallAxis === 0){ wasOnWall = true; climbedTo = Math.max(climbedTo, wc.pos.y);
+    minUpY = Math.min(minUpY, wc.up.y); maxX = Math.max(maxX, wc.pos.x); } }
+if(!wasOnWall) throw new Error('car did not grab the +X wall');
+if(climbedTo < 3) throw new Error('car did not climb the wall: peak y='+climbedTo.toFixed(1));
+if(minUpY > 0.98) throw new Error('body did not tilt onto the wall: min up.y='+minUpY.toFixed(2));
+if(maxX > ARENA.halfX + 0.5) throw new Error('car punched through the wall: x='+maxX.toFixed(1));
 
-// let go of everything and it slides/falls back down to the floor
+// RL sticky force is weaker than gravity: park on a steep wall and ya peel off
+wc.pos.set(ARENA.halfX, 14, 30); wc.vel.set(0,0.5,0); wc.wallAxis=0; wc.wallSign=1;
+wc.onGround=true; wc.yaw=Math.PI/2; stickToWall(wc);
+updateCar(wc, 1/60, {throttle:0,steer:0,boost:false});
+if(wc.wallAxis !== null) throw new Error('a dead-slow car stayed stuck to a vertical wall');
+if(wc.onGround) throw new Error('peeling off a wall should drop ya into the air');
+
+// let go of everything and it ends up back on the floor
 for(let i=0;i<60*4;i++) updateCar(wc, 1/60, {throttle:0,steer:0,boost:false});
 if(wc.wallAxis) throw new Error('car never came off the wall');
 if(Math.abs(wc.up.y-1) > 0.01) throw new Error('up did not reset to +Y after returning to floor');
@@ -418,6 +430,30 @@ for(const [ax, sg] of [[0,1],[0,-1],[1,1],[1,-1]]){
   if(off <= 0) throw new Error('wall '+ax+'/'+sg+': camera is inside the wall (off='+off.toFixed(1)+')');
 }
 game.player.wallAxis=null; game.player.up.set(0,1,0); game.player.pitch=0;
+
+// acceleration profile: strong launch, and boost still carries ya to the cap
+{
+  const t=game.player; t.pos.set(0,0,0); t.vel.set(0,0,0); t.yaw=0; t.onGround=true;
+  t.wallAxis=null; t.up.set(0,1,0); t.pitch=0; t.boost=100; t.shineT=0;
+  const spd=()=>Math.hypot(t.vel.x,t.vel.y,t.vel.z);
+  for(let i=0;i<30;i++){ t.pos.set(0,0,0); updateCar(t,1/60,{throttle:1,steer:0,boost:false}); }
+  const half=spd();
+  // pin to the middle each frame so it can't drive into a wall during the run
+  for(let i=0;i<60*8;i++){ t.boost=100; t.pos.set(0,0,0); updateCar(t,1/60,{throttle:1,steer:0,boost:true}); }
+  const top=spd();
+  if(half < 8) throw new Error('launch too soft: '+half.toFixed(1)+' after 0.5s');
+  if(top < 40) throw new Error('boost never reaches top speed: '+top.toFixed(1));
+  console.log('accel profile OK — 0.5s:'+half.toFixed(1)+'  boosted top:'+top.toFixed(1));
+  // braking must be far stronger than coasting
+  t.vel.set(0,0,40); t.yaw=0;
+  for(let i=0;i<30;i++){ t.pos.set(0,0,0); updateCar(t,1/60,{throttle:0,steer:0,boost:false}); }
+  const coast=Math.hypot(t.vel.x,t.vel.z);
+  t.vel.set(0,0,40);
+  for(let i=0;i<30;i++){ t.pos.set(0,0,0); updateCar(t,1/60,{throttle:-1,steer:0,boost:false}); }
+  const braked=Math.hypot(t.vel.x,t.vel.z);
+  if(braked >= coast) throw new Error('braking no stronger than coasting ('+braked.toFixed(1)+' vs '+coast.toFixed(1)+')');
+  console.log('braking OK — coast:'+coast.toFixed(1)+'  braked:'+braked.toFixed(1));
+}
 
 // boost lasts longer now
 if(BOOST_DRAIN >= 28) throw new Error('boost drain was not reduced');
