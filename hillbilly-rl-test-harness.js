@@ -108,8 +108,8 @@ Object.defineProperty(global, 'navigator', { value: { getGamepads: ()=>[fakePad]
 // ---- load game ----
 const fs=require('fs');
 const src=fs.readFileSync('/tmp/game.js','utf8');
-eval(src + '\n;global.__G={startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,carForward,updateCamera,ARENA,WALL_R,BOOST_DRAIN};');
-const {startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,carForward,updateCamera,ARENA,WALL_R,BOOST_DRAIN} = global.__G;
+eval(src + '\n;global.__G={startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,carForward,updateCamera,ARENA,WALL_R,BOOST_DRAIN,BALL_R,MAX_SPEED,MAX_DRIVE,SUPERSONIC,uu,FLIP_WINDOW};');
+const {startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,carForward,updateCamera,ARENA,WALL_R,BOOST_DRAIN,BALL_R,MAX_SPEED,MAX_DRIVE,SUPERSONIC,uu,FLIP_WINDOW} = global.__G;
 
 // ---- simulate ----
 function frame(){ const fn=rafQueue.shift(); if(fn) fn(); while(pendingTimeouts.length) pendingTimeouts.shift()(); }
@@ -149,7 +149,7 @@ runFrames(120);
 for(let i=0;i<60*20 && game.state!=='play';i++) frame();
 for(const c of cars){ c.pos.set(-70+Math.random()*6, 0, -40+Math.random()*6); c.vel.set(0,0,0); }
 const preA = game.score[0];   // bots can sneak an organic goal in before this — assert the DELTA
-ball.pos.set(70, 5, 0); ball.vel.set(85, 0, 0);
+ball.pos.set(70, BALL_R, 0); ball.vel.set(45, 0, 0);
 runFrames(30);
 console.log('TEST A — score after shot:', game.score, 'state:', game.state);
 // goals are worth 1, or 2 for a trick shot (howitzer/air-mail/special), doubled in LAST CALL
@@ -163,13 +163,15 @@ const dbot = cars.find(c=>!c.isPlayer);
 // shove the ball well clear: after the previous goal it resets to the ORIGIN, which is exactly
 // where this test pins the victim — the player rammed the ball first, recoiled below supersonic,
 // and the demo silently failed (~8% of runs). This test is about car-vs-car, not the ball.
-ball.pos.set(0, 4.4, 40); ball.vel.set(0,0,0);
+ball.pos.set(0, BALL_R, 50); ball.vel.set(0,0,0);
 dbot.pos.set(0,0,0); dbot.vel.set(0,0,0);
-game.player.dead=0; game.player.pos.set(-8,0,0); game.player.yaw=Math.PI/2; game.player.vel.set(58,0,0); game.player.boost=100;
+game.player.dead=0; game.player.pos.set(-4,0,0); game.player.yaw=Math.PI/2;
+game.player.vel.set(MAX_SPEED,0,0); game.player.boost=100;   // must exceed SUPERSONIC to demo
 fakePad.buttons[7].value=1; fakePad.buttons[7].pressed=true; fakePad.buttons[1].pressed=true;
 // PIN the victim: it's bot-driven, so its own AI (personas especially) can drive it clear of the
 // ram inside the 8-frame window — a pre-existing ~8% flake. Hold it still until contact lands.
-for(let i=0;i<30 && !(dbot.dead>0);i++){ dbot.pos.set(0,0,0); dbot.vel.set(0,0,0); frame(); }
+for(let i=0;i<30 && !(dbot.dead>0);i++){ dbot.pos.set(0,0,0); dbot.vel.set(0,0,0);
+  game.player.vel.set(MAX_SPEED,0,0); frame(); }
 fakePad.buttons[7].value=0; fakePad.buttons[7].pressed=false; fakePad.buttons[1].pressed=false;
 console.log('demolition test — bot dead:', dbot.dead>0);
 if(!(dbot.dead>0)) throw new Error('demolition did not trigger');
@@ -181,24 +183,24 @@ console.log('respawn OK');
 
 // camera test: park player against a wall in ball-cam. The camera may retreat past the touchline
 // into the barn (that's where the room to see yer car is) but must stay inside the barn shell.
-game.player.pos.set(0, 0, -49); ball.pos.set(0, 4.4, 0); ball.vel.set(0,0,0);
+game.player.pos.set(0, 0, -(ARENA.halfZ-3)); ball.pos.set(0, BALL_R, 0); ball.vel.set(0,0,0);
 for(let i=0;i<120;i++) frame();
 console.log('camera clamp test — camPos:', camPos.x.toFixed(1), camPos.y.toFixed(1), camPos.z.toFixed(1));
-if(Math.abs(camPos.z) > 52+18+0.5 || Math.abs(camPos.x) > 82-2.4) throw new Error('camera escaped the barn');
-if(Math.abs(camPos.z) > 52 && camPos.y < 8.5) throw new Error('camera behind the hay bales but too low to see over them');
+if(Math.abs(camPos.z) > ARENA.halfZ+18+0.5 || Math.abs(camPos.x) > ARENA.halfX-2.4) throw new Error('camera escaped the barn');
+if(Math.abs(camPos.z) > ARENA.halfZ && camPos.y < 6) throw new Error('camera behind the hay bales but too low to see over them');
 
 // camera follows the car into the goal recess (else it jams at the mouth in front of the car,
 // looking back out at the ball, with the car off the bottom of the screen)
 // PIN the car in the goal each frame: a bot can score during these 120 frames, and the kickoff
 // reset yanks the player back to midfield so the camera legitimately leaves the goal — another
 // pre-existing flake. Holding position keeps the test about the CAMERA, not about bot randomness.
-game.player.pos.set(88, 0, 0); ball.pos.set(0, 4.4, 0); ball.vel.set(0,0,0);
+game.player.pos.set(ARENA.halfX+6, 0, 0); ball.pos.set(0, BALL_R, 0); ball.vel.set(0,0,0);
 // pin the BALL at centre too: a bot scoring mid-test fires resetKickoff INSIDE frame(), which
 // yanks the car out of the goal before updateCamera runs, so the camera legitimately leaves the
 // recess and the assert trips. Freezing the ball keeps this test about the camera alone.
 for(let i=0;i<120;i++){
-  game.player.pos.set(88, 0, 0); game.player.vel.set(0,0,0);
-  ball.pos.set(0, 4.4, 0); ball.vel.set(0,0,0);
+  game.player.pos.set(ARENA.halfX+6, 0, 0); game.player.vel.set(0,0,0);
+  ball.pos.set(0, BALL_R, 0); ball.vel.set(0,0,0);
   frame();
 }
 console.log('goal camera test — camPos:', camPos.x.toFixed(1), camPos.y.toFixed(1), camPos.z.toFixed(1));
@@ -214,7 +216,7 @@ for(const ai of [1, 2, 3]){
   for(let i=0;i<60*20 && game.state!=='play';i++) frame();
   for(const c of cars){ c.pos.set(-70+Math.random()*6, 0, -40+Math.random()*6); c.vel.set(0,0,0); }
   const preS = game.score[0];
-  ball.pos.set(70, 5, 0); ball.vel.set(85, 0, 0);
+  ball.pos.set(70, BALL_R, 0); ball.vel.set(45, 0, 0);
   runFrames(45);
   console.log('arena', ai, 'shot test — score:', game.score, 'state:', game.state);
   if(game.score[0] <= preS) throw new Error('arena '+ai+' shot did not score (pre='+preS+')');
@@ -344,7 +346,7 @@ if(wc.wallAxis) throw new Error('car grabbed a wall out in the open');
 if(Math.abs(wc.pos.y) > 0.001) throw new Error('flat driving lifted off the floor: y='+wc.pos.y);
 
 // aimed into the +X wall at speed, it should climb: y rises and up tilts off +Y
-wc.pos.set(ARENA.halfX - WALL_R + 1, 0, 30); wc.vel.set(60,0,0); wc.yaw=Math.PI/2; wc.wallAxis=null; wc.up.set(0,1,0);
+wc.pos.set(ARENA.halfX - WALL_R*0.5, 0, 30); wc.vel.set(MAX_SPEED,0,0); wc.yaw=Math.PI/2; wc.wallAxis=null; wc.up.set(0,1,0);
 // sample mid-climb: with the RL-size fillet the car tops out fast, and topping out
 // legitimately ends in a peel-off (see below), so don't assert after it's done.
 let climbedTo = 0, wasOnWall = false, minUpY = 1, maxX = 0;
@@ -352,12 +354,12 @@ for(let i=0;i<40;i++){ wc.boost=100; updateCar(wc, 1/60, {throttle:1,steer:0,boo
   if(wc.wallAxis === 0){ wasOnWall = true; climbedTo = Math.max(climbedTo, wc.pos.y);
     minUpY = Math.min(minUpY, wc.up.y); maxX = Math.max(maxX, wc.pos.x); } }
 if(!wasOnWall) throw new Error('car did not grab the +X wall');
-if(climbedTo < 3) throw new Error('car did not climb the wall: peak y='+climbedTo.toFixed(1));
+if(climbedTo < WALL_R*0.5) throw new Error('car did not climb the wall: peak y='+climbedTo.toFixed(1));
 if(minUpY > 0.98) throw new Error('body did not tilt onto the wall: min up.y='+minUpY.toFixed(2));
 if(maxX > ARENA.halfX + 0.5) throw new Error('car punched through the wall: x='+maxX.toFixed(1));
 
 // RL sticky force is weaker than gravity: park on a steep wall and ya peel off
-wc.pos.set(ARENA.halfX, 14, 30); wc.vel.set(0,0.5,0); wc.wallAxis=0; wc.wallSign=1;
+wc.pos.set(ARENA.halfX, ARENA.wallH*0.4, 30); wc.vel.set(0,0.1,0); wc.wallAxis=0; wc.wallSign=1;
 wc.onGround=true; wc.yaw=Math.PI/2; stickToWall(wc);
 updateCar(wc, 1/60, {throttle:0,steer:0,boost:false});
 if(wc.wallAxis !== null) throw new Error('a dead-slow car stayed stuck to a vertical wall');
@@ -382,23 +384,24 @@ if(wc.wallAxis===0 && Math.abs(wc.pos.z) < ARENA.goalHalfW) throw new Error('car
 
 // --- RL air model: boost follows the NOSE, no free lift ---
 // Regression: holding boost with a level nose used to fly ya into the ceiling.
-wc.pos.set(0, 12, 0); wc.vel.set(0,0,0); wc.onGround=false; wc.wallAxis=null;
+wc.pos.set(0, ARENA.ceil*0.4, 0); wc.vel.set(0,0,0); wc.onGround=false; wc.wallAxis=null;
 wc.up.set(0,1,0); wc.pitch=0; wc.yaw=0; wc.boost=100;
 for(let i=0;i<60*3;i++) updateCar(wc, 1/60, {throttle:0,steer:0,boost:true});
-if(wc.pos.y > 12) throw new Error('level-nose boost still climbs (y='+wc.pos.y.toFixed(1)+') — should fall');
+if(wc.pos.y > ARENA.ceil*0.4) throw new Error('level-nose boost still climbs (y='+wc.pos.y.toFixed(1)+') — should fall');
 
 // ...but pitch the nose up first and it climbs, exactly like RL
-wc.pos.set(0, 6, 0); wc.vel.set(0,0,0); wc.onGround=false; wc.wallAxis=null;
+wc.pos.set(0, ARENA.ceil*0.2, 0); wc.vel.set(0,0,0); wc.onGround=false; wc.wallAxis=null;
 wc.up.set(0,1,0); wc.pitch=0; wc.yaw=0; wc.boost=100;
 for(let i=0;i<60*2;i++) updateCar(wc, 1/60, {throttle:-1,steer:0,boost:true});  // stick back = nose up
 if(wc.pitch <= 0.3) throw new Error('pulling back did not pitch the nose up (pitch='+wc.pitch.toFixed(2)+')');
-if(wc.pos.y <= 6) throw new Error('nose-up boost did not climb (y='+wc.pos.y.toFixed(1)+')');
+if(wc.pos.y <= ARENA.ceil*0.2) throw new Error('nose-up boost did not climb (y='+wc.pos.y.toFixed(1)+')');
 
 // --- surface frame must not degenerate on the Z walls ---
 // Regression: the old world-Z reference collapsed there, flipping `forward`,
 // which broke steering AND threw the chase camera in front of the car.
 for(const [ax, sg] of [[0,1],[0,-1],[1,1],[1,-1]]){
-  wc.wallAxis=ax; wc.wallSign=sg; wc.pos.set(ax===0?sg*80:10, 10, ax===0?25:sg*50);
+  wc.wallAxis=ax; wc.wallSign=sg;
+  wc.pos.set(ax===0?sg*(ARENA.halfX-1):10, ARENA.wallH*0.4, ax===0?25:sg*(ARENA.halfZ-1));
   wc.vel.set(0,0,0); wc.yaw=0; stickToWall(wc);
   const upLen = Math.hypot(wc.up.x, wc.up.y, wc.up.z);
   if(Math.abs(upLen-1) > 0.01) throw new Error('wall '+ax+'/'+sg+': normal not unit ('+upLen.toFixed(3)+')');
@@ -417,7 +420,7 @@ wc.wallAxis=null; wc.up.set(0,1,0); wc.pitch=0;
 for(const [ax, sg] of [[0,1],[0,-1],[1,1],[1,-1]]){
   const pl = game.player;
   pl.wallAxis=ax; pl.wallSign=sg; pl.pitch=0;
-  pl.pos.set(ax===0?sg*80:10, 12, ax===0?25:sg*50);
+  pl.pos.set(ax===0?sg*(ARENA.halfX-1):10, ARENA.wallH*0.4, ax===0?25:sg*(ARENA.halfZ-1));
   pl.vel.set(0,0,0); pl.yaw=Math.PI/2;           // climbing straight up
   stickToWall(pl);
   camPos.copy(pl.pos);                            // start on top of the car, let it settle
@@ -441,22 +444,52 @@ game.player.wallAxis=null; game.player.up.set(0,1,0); game.player.pitch=0;
   // pin to the middle each frame so it can't drive into a wall during the run
   for(let i=0;i<60*8;i++){ t.boost=100; t.pos.set(0,0,0); updateCar(t,1/60,{throttle:1,steer:0,boost:true}); }
   const top=spd();
-  if(half < 8) throw new Error('launch too soft: '+half.toFixed(1)+' after 0.5s');
-  if(top < 40) throw new Error('boost never reaches top speed: '+top.toFixed(1));
+  if(half < MAX_DRIVE*0.25) throw new Error('launch too soft: '+half.toFixed(1)+' after 0.5s');
+  if(top < MAX_SPEED*0.92) throw new Error('boost never reaches top speed: '+top.toFixed(1));
   console.log('accel profile OK — 0.5s:'+half.toFixed(1)+'  boosted top:'+top.toFixed(1));
   // braking must be far stronger than coasting
-  t.vel.set(0,0,40); t.yaw=0;
+  t.vel.set(0,0,MAX_DRIVE); t.yaw=0;
   for(let i=0;i<30;i++){ t.pos.set(0,0,0); updateCar(t,1/60,{throttle:0,steer:0,boost:false}); }
   const coast=Math.hypot(t.vel.x,t.vel.z);
-  t.vel.set(0,0,40);
+  t.vel.set(0,0,MAX_DRIVE);
   for(let i=0;i<30;i++){ t.pos.set(0,0,0); updateCar(t,1/60,{throttle:-1,steer:0,boost:false}); }
   const braked=Math.hypot(t.vel.x,t.vel.z);
   if(braked >= coast) throw new Error('braking no stronger than coasting ('+braked.toFixed(1)+' vs '+coast.toFixed(1)+')');
   console.log('braking OK — coast:'+coast.toFixed(1)+'  braked:'+braked.toFixed(1));
 }
 
+// --- powerslide, flip window, ceiling ---
+{
+  const t=game.player;
+  // powerslide keeps lateral momentum (drift) instead of scrubbing it
+  const run=(slide)=>{ t.pos.set(0,0,0); t.vel.set(14,0,14); t.yaw=0; t.onGround=true;
+    t.wallAxis=null; t.up.set(0,1,0); t.pitch=0;
+    for(let i=0;i<20;i++){ t.pos.set(0,0,0); updateCar(t,1/60,{throttle:1,steer:0,boost:false,slide:slide}); }
+    return Math.abs(t.vel.x); };
+  const gripped=run(false), drifting=run(true);
+  if(drifting <= gripped) throw new Error('powerslide did not preserve lateral momentum ('+drifting.toFixed(2)+' vs '+gripped.toFixed(2)+')');
+
+  // the flip expires FLIP_WINDOW after leaving a surface
+  t.pos.set(0,10,0); t.vel.set(0,0,0); t.onGround=false; t.wallAxis=null; t.up.set(0,1,0);
+  t.jumps=1; t.flip=0; t.flipT=0; t.pitch=0;   // window already expired
+  tryJump(t);
+  if(t.jumps===0) throw new Error('flip fired after its window expired');
+  t.flipT=FLIP_WINDOW; tryJump(t);
+  if(t.jumps!==0) throw new Error('flip did not fire inside its window');
+
+  // ceiling: fast enough sticks, slow enough drops off (sticky < gravity)
+  t.pos.set(0,ARENA.ceil,0); t.vel.set(MAX_DRIVE,0,0); t.wallAxis=2; t.wallSign=1;
+  t.onGround=true; t.yaw=0; stickToWall(t);
+  updateCar(t,1/60,{throttle:1,steer:0,boost:false});
+  if(t.wallAxis!==2) throw new Error('a quick car should hang on the ceiling');
+  if(t.up.y > -0.9) throw new Error('ceiling car is not inverted (up.y='+t.up.y.toFixed(2)+')');
+  t.vel.set(0.2,0,0); updateCar(t,1/60,{throttle:0,steer:0,boost:false});
+  if(t.wallAxis===2) throw new Error('a crawling car should drop off the ceiling');
+  console.log('powerslide / flip window / ceiling OK');
+}
+
 // boost lasts longer now
-if(BOOST_DRAIN >= 28) throw new Error('boost drain was not reduced');
+if(Math.abs(BOOST_DRAIN - 33.3) > 0.1) throw new Error('boost drain should be RL 33.3/s');
 console.log('curved walls OK — climb, descend, jump-off, goal-mouth guard; boost drain '+BOOST_DRAIN);
 console.log('RL air+surface OK — nose-only boost, aerial pitch, 4 wall frames, camera stays behind');
 

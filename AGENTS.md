@@ -72,6 +72,37 @@ Two traps that cost real debugging time, both now fixed -- don't reintroduce:
    `relay` candidate actually comes back) and keep the waitin' room CONNECTION INFO readout
    (`remoteSDP > 0` = the devices found each other, so any failure is the peer link, not matchmaking).
 
+## THE WORLD IS NOW IN ROCKET LEAGUE UNITS (read this first)
+
+Everything is derived from RL's real numbers through one constant:
+`const UU = 82/5120` (RL's goal-to-goal half-axis stays 82 world units) and `uu(n) = n*UU`.
+**Define new gameplay values as `uu(<real RL number>)`, not as bare world units.**
+
+The root problem this fixed: the **cars and ball were ~3.5x oversized** relative to the pitch. That
+single error is why it never felt like RL. Anchoring UU on the arena (so the barn, bales, crowd and
+billboards all keep working untouched) and shrinking the cars/ball to true RL proportion fixes it:
+
+| | before | now (RL) |
+|---|---|---|
+| arena half X / Z / ceil | 82 / 52 / 38 | 82 / **65.6** / **32.7** |
+| goal w / h / depth | 18 / 13 / 26 | **14.3 / 10.3 / 14.1** |
+| ball radius | 4.4 | **1.46** |
+| car scale | 1.0 | **×`CAR_SCALE` 0.47** (RL 118uu car) |
+| top drive / cap / supersonic | 44 / — / 46 | **22.6 / 36.8 / 35.2** |
+| camera boom / height | 20 / 7.6 | **4.32 / 1.60** (RL 270/100uu) |
+| walls | to wallH 26 | **to the ceiling** (ceiling is drivable) |
+
+Two frame-rate/scale bugs found during the port — don't reintroduce:
+- Ball rolling friction was applied **per frame** (`vel *= 0.95` every frame = 95% loss per second),
+  so the ball died on the spot and it was frame-rate dependent. It is now a **per-second** coefficient.
+- Car-vs-car demolition was gated on a hardcoded `rel.length() > 38`, which is above the new speed
+  cap — demos became impossible. Now gated on `SUPERSONIC`.
+
+Also implemented from the spec: **powerslide** (`input.slide` — Ctrl / R-Shift / pad L1 — drops lateral
+bite to 0.9 so ya drift and keep momentum), **ceiling driving** (`wallAxis === 2`, up = (0,-1,0);
+sticky is half gravity so ya only hang on while quick), and the **flip window** (`c.flipT`,
+`FLIP_WINDOW` 1.45s after leaving a surface, then no flip).
+
 ## Rocket League fidelity — researched values (do not "simplify" these back)
 
 Documented RL constants (RLBot wiki / GDC "It IS Rocket Science"), and how this game maps to them:

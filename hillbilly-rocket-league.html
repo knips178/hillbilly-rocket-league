@@ -5012,43 +5012,72 @@ STILL TO DO (ideas for future iterations):
    ============================================================ */
 
 // ---------------- CONSTANTS ----------------
-const ARENA = { halfX: 82, halfZ: 52, wallH: 26, ceil: 38, goalHalfW: 18, goalH: 13, goalDepth: 26 };
-const BALL_R0 = 4.4;
-let BALL_R = 4.4;                       // live radius — Maw's "HAWG BALL" wildcard swells it
-const GRAV_CAR = -34, GRAV_BALL = -24;
-const BOOST_DRAIN = 22;   // was 28 — turbo lasts a little longer now (full tank ~4.5s vs ~3.6s)
-// Curved wall-base fillets: cars grab a wall and ride up it (see updateCar).
-// Radius is RL-proportional: real RL corners are ~256uu against a 4096 half-arena
-// (~6%). 16 was ~20% — a giant quarter-pipe you curved up from way too far out.
-const WALL_R = 8;             // fillet radius where wall meets floor
-const WALL_CLIMB_MIN = 24;    // speed you need, aimed into a wall, to grab it
-// RL air model: boost accel is ~1.53x gravity (991 uu/s² vs 650), applied along the
-// NOSE. Matching that ratio here means nose-up + boost climbs, nose-level + boost
-// just goes fast and you still fall — no more accidental ceiling flights.
-const AIR_BOOST = 52;         // 34 gravity x 1.53
-const AIR_PITCH_RATE = 2.6;   // rad/s of nose pitch while airborne
-// RL throttle accel is velocity-dependent (~1600 uu/s² at rest, tapering to 0 at
-// 1410) — that's the punchy launch and soft top end. Braking (opposite throttle)
-// is -3500 vs -525 coasting, i.e. ~6.7x.
-const ACCEL_PEAK = 1.7;       // multiplier at a standstill, tapering to 0 at top speed
-const BRAKE_DRAG = 6.5;       // opposite-throttle braking vs 1.8 coast / 0.35 rolling
-// RL sticky force (325 uu/s²) is HALF gravity (650): too slow on a steep wall and
-// ya peel off. Community rule of thumb is ~300 uu/s to stay stuck.
-const WALL_STICK_MIN = 9;     // below this, a steep wall lets go of ya
-const JUMP_HOLD_T = 0.2;      // RL holds the jump for a taller hop (1460 uu/s²)
-const JUMP_HOLD_ACC = 26;
+// EVERYTHING below is Rocket League's real numbers, converted once through UU.
+// RL works in Unreal units (1 uu = 1 cm). We anchor UU on the arena's goal-to-goal
+// axis (RL ±5120 uu) staying at 82 world units, so the barn, bales, crowd and
+// billboards all keep working. What changes is that the CARS AND BALL shrink to
+// their true RL proportion — they were ~3.5x oversized relative to the pitch, and
+// that single error is what made this feel nothing like RL.
+const UU = 82 / 5120;                  // 1 uu -> world units (0.016015625)
+const uu = n => n * UU;                // RL value -> world units
+
+const ARENA = {
+  halfX:      uu(5120),                // back walls  (goal-to-goal axis) = 82
+  halfZ:      uu(4096),                // side walls                      = 65.6
+  ceil:       uu(2044),                //                                 = 32.7
+  wallH:      uu(2044),                // RL walls run all the way to the ceiling
+  goalHalfW:  uu(892.755),             // centre-to-post                  = 14.3
+  goalH:      uu(642.775),             //                                 = 10.3
+  goalDepth:  uu(880),                 //                                 = 14.1
+};
+const BALL_R0 = uu(91.25);             // RL ball radius                  = 1.46
+let BALL_R = BALL_R0;                  // live radius — Maw's "HAWG BALL" wildcard swells it
+
+// --- world ---
+const GRAV_CAR  = -uu(650);            // RL gravity 650 uu/s²            = -10.4
+const GRAV_BALL = -uu(650);            // the ball falls at the same rate in RL
+
+// --- car, ground ---
+const MAX_DRIVE  = uu(1410);           // throttle-only top speed         = 22.6
+const MAX_SPEED  = uu(2300);           // hard cap, boost/dodge included  = 36.8
+const SUPERSONIC = uu(2200);           // demo threshold + speed trail    = 35.2
+const BOOST_ACC_GROUND = uu(991.667);
+const BOOST_ACC_AIR    = uu(1058.333);
+const BRAKE_ACC  = uu(3500);           // opposite throttle
+const COAST_ACC  = uu(525);            // no input
+const THROTTLE_ACC0 = uu(1600);        // accel at a standstill, tapering to 0 at MAX_DRIVE
+const AIR_THROTTLE_ACC = uu(66.667);
+const BOOST_DRAIN = 33.3;              // boost units per second (RL exact)
+
+// --- jumping & flipping ---
+const JUMP_IMPULSE   = uu(292);        // along the car's ROOF, not world up
+const JUMP_HOLD_ACC  = uu(1460);       // extra push while held...
+const JUMP_HOLD_T    = 0.2;            // ...for up to 0.2s = variable hop height
+const FLIP_IMPULSE   = uu(500);
+const FLIP_DURATION  = 0.65;
+const FLIP_WINDOW    = 1.45;           // flip stays available this long after leaving a surface
+const STICKY_ACC     = uu(325);        // holds wheels to any surface; HALF of gravity
+
+// --- air control ---
+const AIR_PITCH_RATE = 4.0;            // rad/s (RL caps angular velocity at 5.5)
+const MAX_ANG_VEL    = 5.5;
+
+// --- surfaces ---
+const WALL_R = uu(256);                // curved floor<->wall ramp        = 4.1
+const WALL_CLIMB_MIN = uu(300);        // speed needed to grab a wall     = 4.8
+const WALL_STICK_MIN = uu(300);        // below this a steep surface lets go of ya
 const UP_Y = { x:0, y:1, z:0 };
-const CAR_COLL_R = 3.0;
-const SUPERSONIC = 46;
+const CAR_COLL_R = uu(59);             // half of RL's 118uu car length   = 0.95
 // live gameplay-modifier multipliers (Maw's Wildcards bend these; 1 = normal)
 let gravCarMul = 1, gravBallMul = 1, gripMul = 1, topMul = 1, boostFree = false;
 
+const CAR_SCALE = 0.47;   // shrinks the models to RL's 118uu car against this pitch
 const VEHICLES = [
-  { id:'pickup',  name:'Deere John',        flavor:'Ride-on mower that cuts grass, corners, and grudges. Duct tape and pure spite.', top:44, accel:38, turn:2.6, power:1.0, scale:1.0,  special:'dash',     specialName:'NITRO TILL' },
-  { id:'muscle',  name:'Turbo Trimmer',     flavor:'Souped-up zero-turn. Idles like a chainsaw, corners like a threat.',           top:50, accel:42, turn:2.2, power:0.9, scale:0.95, special:'backfire', specialName:'BACKFIRE' },
-  { id:'mower',   name:'Grass Assassin',    flavor:'Zero-turn ridin\' mower. Cuts grass, cuts corners, cuts you off.',            top:38, accel:36, turn:3.4, power:0.8, scale:0.85, special:'spin',     specialName:'BLADE SPIN' },
-  { id:'monster', name:'Big Bessie',        flavor:'A 2,000-lb heifer with a hick in the saddle. Moo-ves the ball AND the earth.', top:41, accel:32, turn:2.0, power:1.35, scale:1.25, special:'stampede', specialName:'STAMPEDE' },
-  { id:'tractor', name:'Sir Loin',          flavor:'Grandpa\'s prize steer, saddled up. Slower than molasses, hits like a stampede.', top:36, accel:30, turn:2.1, power:1.5, scale:1.15, special:'bullrush', specialName:'BULL RUSH' },
+  { id:'pickup',  name:'Deere John',        flavor:'Ride-on mower that cuts grass, corners, and grudges. Duct tape and pure spite.', top:MAX_DRIVE*1.00, accel:38, turn:2.6, power:1.0, scale:1.0,  special:'dash',     specialName:'NITRO TILL' },
+  { id:'muscle',  name:'Turbo Trimmer',     flavor:'Souped-up zero-turn. Idles like a chainsaw, corners like a threat.',           top:MAX_DRIVE*1.10, accel:42, turn:2.2, power:0.9, scale:0.95, special:'backfire', specialName:'BACKFIRE' },
+  { id:'mower',   name:'Grass Assassin',    flavor:'Zero-turn ridin\' mower. Cuts grass, cuts corners, cuts you off.',            top:MAX_DRIVE*0.88, accel:36, turn:3.4, power:0.8, scale:0.85, special:'spin',     specialName:'BLADE SPIN' },
+  { id:'monster', name:'Big Bessie',        flavor:'A 2,000-lb heifer with a hick in the saddle. Moo-ves the ball AND the earth.', top:MAX_DRIVE*0.95, accel:32, turn:2.0, power:1.35, scale:1.25, special:'stampede', specialName:'STAMPEDE' },
+  { id:'tractor', name:'Sir Loin',          flavor:'Grandpa\'s prize steer, saddled up. Slower than molasses, hits like a stampede.', top:MAX_DRIVE*0.85, accel:30, turn:2.1, power:1.5, scale:1.15, special:'bullrush', specialName:'BULL RUSH' },
 ];
 
 const BOT_NAMES = ['Cletus','Bobby Ray','Skeeter','Darlene','Junior','Rooster','Tammy Lynn','Earl','Peanut','Doyle'];
@@ -6595,7 +6624,7 @@ const pads = [];
 // boost pads are jars of moonshine ("SHINE") — big pad = full jar, small = half-pint
 function addPad(x, z, big){
   const grp = new THREE.Group(); grp.position.set(x,0,z);
-  const s = big ? 1.0 : 0.62;
+  const s = (big ? 1.0 : 0.62) * 0.5;   // pads scale with the smaller cars
   const glass  = new THREE.MeshLambertMaterial({ color:0xdfe6cf, transparent:true, opacity:0.4 });
   const shine  = new THREE.MeshLambertMaterial({ color:0xf0b24a, emissive: big?0xc07a10:0x8a560c });
   const lid    = new THREE.MeshLambertMaterial({ color:0xc2c8ce, emissive:0x2e353a });
@@ -6609,10 +6638,13 @@ function addPad(x, z, big){
     new THREE.MeshBasicMaterial({ color: big?0xffb347:0xdd8833, transparent:true, opacity:0.28, depthWrite:false }));
   ring.rotation.x=-Math.PI/2; ring.position.y=0.05; grp.add(ring);
   scene.add(grp);
-  pads.push({ x, z, big, mesh:grp, timer:0, r: big?4.5:3.2 });
+  pads.push({ x, z, big, mesh:grp, timer:0, r: big?uu(208):uu(144) });
 }
-[[-72,-42],[-72,42],[72,-42],[72,42],[0,-46],[0,46]].forEach(([x,z])=>addPad(x,z,true));
-[[-40,0],[40,0],[-20,-25],[-20,25],[20,-25],[20,25],[0,0],[-60,0],[60,0],[-40,-38],[-40,38],[40,-38],[40,38]].forEach(([x,z])=>addPad(x,z,false));
+[[-0.88,-0.80],[-0.88,0.80],[0.88,-0.80],[0.88,0.80],[0,-0.88],[0,0.88]]
+  .forEach(([x,z])=>addPad(x*ARENA.halfX, z*ARENA.halfZ, true));
+[[-0.49,0],[0.49,0],[-0.24,-0.48],[-0.24,0.48],[0.24,-0.48],[0.24,0.48],[0,0],
+ [-0.73,0],[0.73,0],[-0.49,-0.73],[-0.49,0.73],[0.49,-0.73],[0.49,0.73]]
+  .forEach(([x,z])=>addPad(x*ARENA.halfX, z*ARENA.halfZ, false));
 
 // ---------------- PARTICLES ----------------
 const POOL = 320, partPool = [];
@@ -7229,7 +7261,7 @@ const cars = [];
 function makeCar(name, team, vehIdx, isPlayer){
   const v = VEHICLES[vehIdx];
   const mesh = buildVehicleMesh(v.id, TEAM_COLOR[team]);
-  mesh.scale.setScalar(v.scale);
+  mesh.scale.setScalar(v.scale * CAR_SCALE);
   // team underglow
   const glow = new THREE.Mesh(new THREE.CircleGeometry(4.4, 20),
     new THREE.MeshBasicMaterial({ color: team===0?0x3388ff:0xff5533, transparent:true, opacity:0.35, depthWrite:false }));
@@ -7253,7 +7285,7 @@ function makeCar(name, team, vehIdx, isPlayer){
     smokeT: 0, dead: 0,
     pos:new THREE.Vector3(), vel:new THREE.Vector3(), yaw:0,
     onGround:true, jumps:2, boost:33, flip:0, flipDir:0, rollVis:0, steerVis:0,
-    up:new THREE.Vector3(0,1,0), wallAxis:null, wallSign:1, pitch:0, jumpHoldT:0, jumpN:null,   // surface normal + aerial nose pitch
+    up:new THREE.Vector3(0,1,0), wallAxis:null, wallSign:1, pitch:0, jumpHoldT:0, jumpN:null, flipT:0, slideT:0,   // surface normal + aerial nose pitch
     aiTimer:Math.random()*2, aiJumpCd:0, goals:0, touches:0, demos:0,
     specialCd:0, spinT:0, shineT:0, stewT:0, demoStreak:0, demoStreakT:0, aiSpecialCd:2+Math.random()*3,
     persona: isPlayer ? null : PERSONAS[Math.floor(Math.random()*PERSONAS.length)],
@@ -7332,6 +7364,13 @@ function projectWall(p, y, half){
 // normal, and scrub velocity into the surface so momentum rolls along the curve.
 function stickToWall(c){
   const axis = c.wallAxis, sign = c.wallSign;
+  if(axis === 2){                       // ---- ceiling ----
+    c.pos.y = ARENA.ceil;
+    if(!c.up) c.up = { x:0, y:1, z:0 };
+    c.up.x = 0; c.up.y = -1; c.up.z = 0;             // "up" for the car points DOWN at the pitch
+    c.vel.y = Math.min(0, c.vel.y) * 0;              // no velocity into the ceiling
+    return;
+  }
   const half = axis===0 ? ARENA.halfX : ARENA.halfZ;
   const p = sign * (axis===0 ? c.pos.x : c.pos.z);      // distance toward the wall
   const r = projectWall(p, c.pos.y, half);
@@ -7351,6 +7390,7 @@ function deriveUp(c){
   if(!c.up) c.up = { x:0, y:1, z:0 };
   const y = c.pos.y;
   if(y < 0.2){ c.up.x=0; c.up.y=1; c.up.z=0; c.wallAxis=null; return; }
+  if(y > ARENA.ceil - 0.6){ c.up.x=0; c.up.y=-1; c.up.z=0; c.wallAxis=2; c.wallSign=1; return; }
   const dxp = ARENA.halfX - Math.abs(c.pos.x), dzp = ARENA.halfZ - Math.abs(c.pos.z);
   let axis, sign;
   if(dxp <= dzp && dxp < WALL_R + 3 && Math.abs(c.pos.z) > ARENA.goalHalfW){ axis=0; sign=Math.sign(c.pos.x)||1; }
@@ -7380,9 +7420,9 @@ function orientCarMesh(c){
 function kickoffSpots(team){
   const sx = team===0 ? -1 : 1;
   return [
-    { x: sx*55, z: 0,   yaw: team===0 ? Math.PI/2 : -Math.PI/2 },
-    { x: sx*45, z: -22, yaw: team===0 ? Math.PI/2 : -Math.PI/2 },
-    { x: sx*45, z: 22,  yaw: team===0 ? Math.PI/2 : -Math.PI/2 },
+    { x: sx*ARENA.halfX*0.67, z: 0,                  yaw: team===0 ? Math.PI/2 : -Math.PI/2 },
+    { x: sx*ARENA.halfX*0.55, z: -ARENA.halfZ*0.42,  yaw: team===0 ? Math.PI/2 : -Math.PI/2 },
+    { x: sx*ARENA.halfX*0.55, z:  ARENA.halfZ*0.42,  yaw: team===0 ? Math.PI/2 : -Math.PI/2 },
   ];
 }
 // NOTE: yaw convention: forward = (sin yaw, 0, cos yaw). To face +X, yaw = PI/2. To face -X, yaw = -PI/2.
@@ -7640,7 +7680,7 @@ function updateCrossers(dt){
     for(const c of cars){
       if(c.dead > 0) continue;
       const dx = c.pos.x - cr.g.position.x, dz = c.pos.z - cr.g.position.z;
-      if(dx*dx + dz*dz < 16 && Math.abs(c.pos.y) < 4){ squashCritter(cr, c); hit = true; break; }
+      if(dx*dx + dz*dz < 4 && Math.abs(c.pos.y) < 2){ squashCritter(cr, c); hit = true; break; }
     }
     // ...or run down by the sack itself, which used to roll clean THROUGH them
     if(!hit && ball.pos.y < BALL_R*1.8){
@@ -8066,6 +8106,7 @@ function pollPad(){
     throttle: (b[7] ? b[7].value : 0) - (b[6] ? b[6].value : 0),   // R2 gas, L2 reverse
     boost: pressed(1) || pressed(5),                                // ◯ or R1
     jumpEdge: edge(0), jumpHeld: b[0] && b[0].pressed,              // ✕
+    slide: !!(b[4] && b[4].pressed),                                // L1 = powerslide
     camEdge: edge(3),                                               // △
     specialEdge: edge(2),                                           // ▢ — signature move
     pauseEdge: edge(9),                                             // OPTIONS
@@ -8100,14 +8141,14 @@ function tryJump(c){
     c.jumpHoldT = JUMP_HOLD_T;
     if(c.wallAxis !== null){
       // leap off the wall along its normal, then fall free
-      c.vel.x += c.up.x*16; c.vel.y += c.up.y*16; c.vel.z += c.up.z*16;
+      c.vel.x += c.up.x*JUMP_IMPULSE; c.vel.y += c.up.y*JUMP_IMPULSE; c.vel.z += c.up.z*JUMP_IMPULSE;
       rebaseYawToFloor(c);
       c.wallAxis = null; c.up.set(0,1,0); c.pitch = 0;
     } else {
-      c.vel.y = 14;
+      c.vel.y = JUMP_IMPULSE;
     }
-    c.onGround=false; c.jumps=1; beep(220,0.08,'square',0.06);
-  } else if(c.jumps>0 && c.flip<=0){
+    c.onGround=false; c.jumps=1; c.flipT = FLIP_WINDOW; beep(220,0.08,'square',0.06);
+  } else if(c.jumps>0 && c.flip<=0 && c.flipT > 0){   // RL: flip expires after FLIP_WINDOW
     c.jumps=0;
     // flip: direction from steering keys, default forward
     let dx=0, dz=1;
@@ -8120,10 +8161,10 @@ function tryJump(c){
     }
     const f = carForward(c);
     const right = new THREE.Vector3(f.z,0,-f.x);
-    const imp = f.clone().multiplyScalar(dz*18).add(right.multiplyScalar(dx*14));
+    const imp = f.clone().multiplyScalar(dz*FLIP_IMPULSE).add(right.multiplyScalar(dx*FLIP_IMPULSE*0.78));
     c.vel.x += imp.x; c.vel.z += imp.z;
-    c.vel.y = Math.max(c.vel.y, 4);
-    c.flip = 0.55; c.flipDir = dz>=0?1:-1;
+    c.vel.y = Math.max(c.vel.y, FLIP_IMPULSE*0.22);
+    c.flip = FLIP_DURATION; c.flipDir = dz>=0?1:-1;
     beep(300,0.1,'square',0.06);
   }
 }
@@ -8166,22 +8207,21 @@ function updateCar(c, dt, input){
     let throttle = input.throttle;
     const fwdSpeed = c.vel.dot(f);
     let max = v.top * topM + (canBoost ? 16 : 0);
-    // RL accel curve: hardest off the line, fading to nothing at the THROTTLE-only
-    // top speed (RL: 1600 uu/s² at rest -> 0 at 1410). Past that, boost alone carries
-    // ya to the cap — which is exactly why boost matters at speed.
-    const driveMax = Math.max(1, v.top * topM);
+    // RL accel curve: 1600 uu/s² at a standstill, fading to nothing at the
+    // THROTTLE-only top speed (1410). Past that, boost alone carries ya to the cap.
+    const driveMax = Math.max(0.01, v.top * topM);
     const accelFade = Math.max(0, 1 - Math.abs(fwdSpeed) / driveMax);
-    const acc = v.accel * SURF.accel * throttle * ACCEL_PEAK * accelFade;
+    const acc = THROTTLE_ACC0 * (v.accel/38) * SURF.accel * throttle * accelFade;
     c.vel.x += f.x * acc * dt;
     c.vel.y += f.y * acc * dt;
     c.vel.z += f.z * acc * dt;
     if(canBoost){
-      c.vel.x += f.x*30*dt; c.vel.y += f.y*30*dt; c.vel.z += f.z*30*dt;
+      c.vel.x += f.x*BOOST_ACC_GROUND*dt; c.vel.y += f.y*BOOST_ACC_GROUND*dt; c.vel.z += f.z*BOOST_ACC_GROUND*dt;
       if(!freeB) c.boost = Math.max(0, c.boost - BOOST_DRAIN*dt);
     }
     // on a wall, gravity still pulls ya toward the floor; the normal component
     // gets scrubbed by stickToWall, so what's left drags ya back down the wall
-    if(attached) c.vel.y += GRAV_CAR * gravCarMul * dt;
+    if(attached) c.vel.y += GRAV_CAR * gravCarMul * dt;   // walls AND ceiling
     // steering (need speed) — rotates about the surface normal via yaw
     const spd = Math.hypot(c.vel.x, c.vel.y, c.vel.z);
     const dir = fwdSpeed>=0?1:-1;
@@ -8190,18 +8230,30 @@ function updateCar(c, dt, input){
     const nf = carForward(c);
     const fwdComp = c.vel.dot(nf);
     const latV = c.vel.clone().sub(nf.clone().multiplyScalar(fwdComp));
-    // ice barely bites (drift city); bog mud grabs hard; wildcards can grease the whole floor
-    c.vel.sub(latV.multiplyScalar(Math.min(1, 9*SURF.grip*gripMul*dt)));
+    // ice barely bites (drift city); bog mud grabs hard; wildcards can grease the whole floor.
+    // POWERSLIDE (RL handbrake): drop the lateral bite almost entirely and ya drift,
+    // carrying yer momentum through the corner instead of scrubbing it off.
+    const bite = input.slide ? 0.9 : 9;
+    c.vel.sub(latV.multiplyScalar(Math.min(1, bite*SURF.grip*gripMul*dt)));
+    if(input.slide) c.slideT = 0.25;
     // rolling drag + no-throttle brake (a lifted throttle barely slows ya on ice)
     const eGrip = SURF.grip * gripMul;
-    // braking is throttle held AGAINST the way yer already travelling
+    // RL decelerations: braking (throttle held AGAINST travel) is -3500 uu/s²,
+    // coasting is -525. Applied as a real decel along travel, not a fudge factor.
     const braking = throttle !== 0 && fwdSpeed * throttle < -0.01;
-    const drag = (braking ? BRAKE_DRAG : (throttle===0 ? 1.8 : 0.35)) * (eGrip < 1 ? eGrip*2 : 1);
-    c.vel.x -= c.vel.x*drag*dt; c.vel.z -= c.vel.z*drag*dt;
-    if(attached) c.vel.y -= c.vel.y*drag*dt;
+    const decel = (braking ? BRAKE_ACC : (throttle===0 ? COAST_ACC : 0)) * (eGrip < 1 ? eGrip : 1);
+    if(decel > 0){
+      const sp = Math.hypot(c.vel.x, c.vel.y, c.vel.z);
+      if(sp > 1e-4){
+        const drop = Math.min(sp, decel*dt) / sp;
+        c.vel.x -= c.vel.x*drop; c.vel.z -= c.vel.z*drop;
+        if(attached) c.vel.y -= c.vel.y*drop;
+      }
+    }
     // clamp (3D so climbing speed counts too)
     const s2 = Math.hypot(c.vel.x, c.vel.y, c.vel.z);
-    if(s2>max){ const k=max/s2; c.vel.x*=k; c.vel.y*=k; c.vel.z*=k; }
+    const cap = Math.min(MAX_SPEED, max);
+    if(s2>cap){ const k=cap/s2; c.vel.x*=k; c.vel.y*=k; c.vel.z*=k; }
   } else {
     // AIR — the Rocket League model. Boost accelerates ONLY along the car's nose;
     // there is no free vertical lift. (The old code added +45/s up vs 34 gravity,
@@ -8222,16 +8274,32 @@ function updateCar(c, dt, input){
     c.pitch = THREE.MathUtils.clamp((c.pitch||0) - input.throttle * AIR_PITCH_RATE * dt, -1.25, 1.25);
     if(canBoost){
       const fa = carForward(c);                           // includes pitch
-      c.vel.x += fa.x*AIR_BOOST*dt; c.vel.y += fa.y*AIR_BOOST*dt; c.vel.z += fa.z*AIR_BOOST*dt;
+      c.vel.x += fa.x*BOOST_ACC_AIR*dt; c.vel.y += fa.y*BOOST_ACC_AIR*dt; c.vel.z += fa.z*BOOST_ACC_AIR*dt;
       if(!freeB) c.boost = Math.max(0, c.boost - BOOST_DRAIN*dt);
     }
   }
 
   if(c.flip>0){ c.flip -= dt; }
+  if(c.flipT > 0 && !c.onGround) c.flipT -= dt;
+  if(c.slideT > 0) c.slideT -= dt;
 
   c.pos.addScaledVector(c.vel, dt);
 
-  if(attached){
+  if(attached && c.wallAxis === 2){
+    // ---- riding the CEILING (RL lets ya, briefly) ----
+    // Sticky (325) is only half gravity (650), so ya hang on only while quick.
+    const spdC = Math.hypot(c.vel.x, c.vel.y, c.vel.z);
+    const offEdge = Math.abs(c.pos.x) > ARENA.halfX - 1 || Math.abs(c.pos.z) > ARENA.halfZ - 1;
+    if(spdC < WALL_STICK_MIN*1.6 || offEdge){
+      rebaseYawToFloor(c);
+      c.wallAxis = null; c.up.set(0,1,0); c.onGround = false;
+      c.jumps = Math.max(c.jumps, 1); c.flipT = FLIP_WINDOW;
+    } else {
+      c.pos.x = THREE.MathUtils.clamp(c.pos.x, -(ARENA.halfX-1), ARENA.halfX-1);
+      c.pos.z = THREE.MathUtils.clamp(c.pos.z, -(ARENA.halfZ-1), ARENA.halfZ-1);
+      stickToWall(c);
+    }
+  } else if(attached){
     // ---- riding a wall ----
     // RL's sticky force (325 uu/s²) is only HALF gravity (650) — dawdle on a steep
     // wall and ya peel off and fall. Rule of thumb is ~300 uu/s to stay stuck.
@@ -8239,7 +8307,7 @@ function updateCar(c, dt, input){
     if(steep > 0.35 && Math.hypot(c.vel.x, c.vel.y, c.vel.z) < WALL_STICK_MIN){
       rebaseYawToFloor(c);
       c.wallAxis = null; c.up.set(0,1,0); c.onGround = false;
-      c.jumps = Math.max(c.jumps, 1);                   // RL: peeling off keeps yer flip
+      c.jumps = Math.max(c.jumps, 1); c.flipT = FLIP_WINDOW;   // RL: peeling off keeps yer flip
     } else {
     const half = c.wallAxis===0 ? ARENA.halfX : ARENA.halfZ;
     const p = c.wallSign * (c.wallAxis===0 ? c.pos.x : c.pos.z);   // distance toward the wall
@@ -8249,7 +8317,13 @@ function updateCar(c, dt, input){
       rebaseYawToFloor(c);
       c.wallAxis = null; c.up.set(0,1,0); if(c.pos.y < 0.1) c.pos.y = 0;
     } else {
-      if(c.pos.y >= ARENA.wallH){ c.pos.y = ARENA.wallH; c.vel.y = Math.min(0, c.vel.y); }
+      if(c.pos.y >= ARENA.ceil - 0.05){
+        // topped out the wall — carry on onto the ceiling, like RL
+        if(c.vel.y > WALL_STICK_MIN){
+          c.pos.y = ARENA.ceil; c.wallAxis = 2; c.wallSign = 1;
+          stickToWall(c); rebaseYawToWall(c);
+        } else { c.pos.y = ARENA.ceil - 0.05; c.vel.y = Math.min(0, c.vel.y); }
+      }
       // keep the lateral coord inside the playfield
       const lateral = c.wallAxis===0 ? c.pos.z : c.pos.x;
       const latMax = c.wallAxis===0 ? ARENA.halfZ - 2 : ARENA.halfX - 2;
@@ -8261,7 +8335,7 @@ function updateCar(c, dt, input){
   } else {
     // ---- floor / air ----
     if(c.pos.y <= 0){
-      if(c.vel.y < -14){
+      if(c.vel.y < -7.18){
         thump(Math.min(1, -c.vel.y/30));
         const n = 12 + Math.min(20, (-c.vel.y/3)|0);   // dust ring spreads outward, bigger on harder landings
         for(let k=0;k<n;k++){ const a=Math.random()*Math.PI*2, r=1+Math.random()*3.5;
@@ -8272,6 +8346,7 @@ function updateCar(c, dt, input){
       c.pos.y = 0; c.vel.y = 0; c.up.set(0,1,0); c.pitch = 0;
       if(!c.onGround){ c.onGround = true; c.jumps = 2; c.flip = 0; }
     } else if (c.pos.y > 0.05){
+      if(c.onGround) c.flipT = FLIP_WINDOW;   // ya just left the ground — flip clock starts
       c.onGround = false;
     }
     // ceiling
@@ -8307,7 +8382,7 @@ function updateCar(c, dt, input){
   for(const p of pads){
     if(p.timer>0) continue;
     const dx=c.pos.x-p.x, dz=c.pos.z-p.z;
-    if(dx*dx+dz*dz < p.r*p.r && c.pos.y<4){
+    if(dx*dx+dz*dz < p.r*p.r && c.pos.y < uu(168)){
       if(p.big){ c.boost = 100; p.timer = 10; }
       else { c.boost = Math.min(100, c.boost+12); p.timer = 4; }
       p.mesh.visible = false;
@@ -8414,8 +8489,15 @@ function updateBall(dt){
     if(Math.abs(ball.vel.y)>2) thump(Math.min(1,Math.abs(ball.vel.y)/30));
     // pond ice skitters the sack along; bog mud eats the bounce whole
     ball.vel.y = -ball.vel.y * SURF.bounce;
-    ball.vel.x *= SURF.roll; ball.vel.z *= SURF.roll;
-    if(Math.abs(ball.vel.y)<2.5) ball.vel.y = 0;
+    // Rolling friction was applied PER FRAME, so it was frame-rate dependent and
+    // scrubbed ~95%/s of the ball's speed. Convert to a per-second rate (identical
+    // at 60fps) — RL's ball rolls a long way, and now so does this one.
+    // ...and re-read as a PER-SECOND coefficient. As a per-frame value 0.95 meant
+    // losing 95% of speed every second — the ball died on the spot. RL's ball rolls
+    // a long way, which matters even more now the pitch is RL-sized.
+    const rollK = Math.pow(SURF.roll, dt);
+    ball.vel.x *= rollK; ball.vel.z *= rollK;
+    if(Math.abs(ball.vel.y) < uu(150)) ball.vel.y = 0;
   }
   // ceiling
   if(ball.pos.y > ARENA.ceil - BALL_R){ ball.pos.y = ARENA.ceil-BALL_R; ball.vel.y = -Math.abs(ball.vel.y)*0.7; }
@@ -8480,19 +8562,19 @@ function carBallCollide(c, dt){
     const impact = Math.max(0, rel.dot(n));
     // a lit sack hits harder — rallies escalate
     const pow = c.veh.power * (c.flip>0 ? 1.5 : 1) * (ball.onFire ? 1.22 : 1) * (c.stewT>0 ? STEW_POW : 1);
-    ball.vel.addScaledVector(n, impact*1.35*pow + 6*pow);
-    ball.vel.y += 3.5*pow;  // pop-up bias
+    ball.vel.addScaledVector(n, impact*1.35*pow + 3.08*pow);
+    ball.vel.y += 1.80*pow;  // pop-up bias
     ball.vel.addScaledVector(c.vel, 0.35);
     // car recoil
     c.vel.addScaledVector(n, -impact*0.25);
-    if(impact>3){
+    if(impact>1.54){
       ball.lastTouch = c; c.touches++;
       applyHitSpin(c, n);                                  // off-centre whacks bend the flight
       bumpHeat();
       ball.shotFromX = c.pos.x; ball.shotAir = !c.onGround; ball.shotSpecial = false;
     }
     // contact feedback — burlap flecks n' amber sparks off the strike point, whack scaled to the hit
-    if(impact > 6){
+    if(impact > 3.08){
       const cx = ball.pos.x - n.x*BALL_R, cy = ball.pos.y - n.y*BALL_R, cz = ball.pos.z - n.z*BALL_R;
       const k = Math.min(1, impact/45);
       const nP = 4 + Math.floor(k*10);
@@ -8598,9 +8680,10 @@ function carCarCollide(a, b){
       const aTake = (aStew && !bStew) ? 0.25 : 1, bTake = (bStew && !aStew) ? 0.25 : 1;
       const aGive = (bStew && !aStew) ? 2.1 : 1, bGive = (aStew && !bStew) ? 2.1 : 1;
       a.vel.addScaledVector(n, -imp*aTake*aGive); b.vel.addScaledVector(n, imp*bTake*bGive);
-      if(imp>10){ thump(0.6); if(a.isPlayer||b.isPlayer) rumble(220, 0.8, 0.4); }
+      if(imp>uu(600)){ thump(0.6); if(a.isPlayer||b.isPlayer) rumble(220, 0.8, 0.4); }
       // supersonic DEMOLITION (judged on speed BEFORE the hit) — stew lowers the bar to wreck folks
-      if(rel.length() > 38 && game.state==='play'){
+      // RL demolishes when the attacker is SUPERSONIC; gate on closing speed first
+      if(rel.length() > SUPERSONIC*0.55 && game.state==='play'){
         const fast = preSa > preSb ? a : b;
         const slow = fast===a ? b : a;
         const bar = fast.stewT > 0 ? SUPERSONIC*0.62 : SUPERSONIC;
@@ -8711,7 +8794,7 @@ function botJump(c, doubleFlip){
           c.jumps=0;
           const f = carForward(c);
           c.vel.x += f.x*18; c.vel.z += f.z*18; c.vel.y = Math.max(c.vel.y,4);
-          c.flip = 0.55; c.flipDir = 1;
+          c.flip = FLIP_DURATION; c.flipDir = 1;
         }
       }, 180);
     }
@@ -9805,10 +9888,10 @@ document.getElementById('wr-copy').onclick = ()=>{
 // ---------------- CAMERA (tuned to real Rocket League specs, scaled) ----------------
 // RL defaults: distance 270uu, height 110uu, angle -3°, stiffness ~0.45, smoothed swivel.
 // Our car ≈ 7 units vs RL 118uu → scale ≈ 0.06: distance ≈ 16-21, height ≈ 6.6-8.
-const CAM_DIST = 20, CAM_HEIGHT = 7.6;
+const CAM_DIST = uu(270), CAM_HEIGHT = uu(100);   // RL boom + height
 // RL "stiffness": the boom lengthens as ya speed up so the camera falls behind —
 // the spec calls this the primary speed feedback. ~25% longer flat out.
-const CAM_ZOOM = 5.0;
+const CAM_ZOOM = uu(70);
 function camBoom(p){
   const sp = Math.hypot(p.vel.x, p.vel.y, p.vel.z);
   return CAM_DIST + CAM_ZOOM * THREE.MathUtils.clamp(sp / SUPERSONIC, 0, 1);
@@ -10030,11 +10113,13 @@ function animate(){
       if(keys['KeyD']||keys['ArrowRight']) pin.steer -= 1;
       pin.boost = !!(keys['ShiftLeft']||keys['ShiftRight']);
       pin.jumpHeld = !!keys['Space'];
+      pin.slide = !!(keys['ControlLeft']||keys['ControlRight']||keys['ShiftRight']);
       if(pad){ // merge controller input
         pin.throttle = THREE.MathUtils.clamp(pin.throttle + pad.throttle, -1, 1);
         pin.steer    = THREE.MathUtils.clamp(pin.steer + pad.steer, -1, 1);
         pin.boost    = pin.boost || pad.boost;
         pin.jumpHeld = pin.jumpHeld || pad.jumpHeld;
+        pin.slide    = pin.slide || pad.slide;
       }
       if(TOUCH.on){ // merge touch stick
         pin.throttle = THREE.MathUtils.clamp(pin.throttle + TOUCH.throttle, -1, 1);
