@@ -152,6 +152,28 @@ Yaw means "angle within the current surface frame", so it is re-expressed at eve
 Harness pins all of it: nose-only boost doesn't climb, nose-up boost does, all four wall frames are
 unit + correctly oriented, and the camera stays behind and outside the wall on each.
 
+## Camera: the car must never leave the screen
+
+There is deliberately **no separate wall camera**. One path computes an offset (ball->car line in
+ball-cam, behind the nose in car-cam), then:
+1. the height is added along the **surface normal**, not world-Y (adding it along Y wiped the
+   "behind" component on a wall, where forward points straight up, parking the lens in front of ya);
+2. on a surface the offset is **slid along** that surface — "away from the ball" usually points INTO
+   the wall, which used to put the lens on the ball's side of the car;
+3. `fitBoom` shortens the arm so the lens stays inside the shell (RL's collision probe) instead of
+   sliding off the car->ball line — and it only applies the narrow goal-mouth Z limit when the car is
+   **actually in the recess** (testing x alone crushed the boom to minimum near the end walls);
+4. finally, after smoothing, the aim is swung toward the car until it is within 18 deg of the view
+   axis. Up a wall ya genuinely cannot sit behind the car AND stare at the ball, so this frames both.
+   Applied to the SMOOTHED aim against the real lens position — correcting the target just lagged.
+
+Harness pins it: the car must be <35 deg off the view axis at the wall base, up a wall, in a deep
+corner and inside the goal, in BOTH camera modes. `setBallCam()` exists so tests can switch mode
+(the game's `let ballCam` isn't assignable from the harness).
+
+`resetKickoff` must also clear `wallAxis` / `up` / `pitch` / `flipT` — scoring while wall-riding used
+to leave the car sat sideways on the kickoff line with `yaw` read in the WALL frame.
+
 ## The playable shell (floor -> wall -> ceiling is ONE surface)
 
 After the RL rescale the physics walls (±65.6) and ceiling (32.7) had **no meshes at all** — the

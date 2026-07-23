@@ -108,8 +108,8 @@ Object.defineProperty(global, 'navigator', { value: { getGamepads: ()=>[fakePad]
 // ---- load game ----
 const fs=require('fs');
 const src=fs.readFileSync('/tmp/game.js','utf8');
-eval(src + '\n;global.__G={startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,carForward,updateCamera,ARENA,WALL_R,BOOST_DRAIN,BALL_R,MAX_SPEED,MAX_DRIVE,SUPERSONIC,uu,FLIP_WINDOW};');
-const {startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,carForward,updateCamera,ARENA,WALL_R,BOOST_DRAIN,BALL_R,MAX_SPEED,MAX_DRIVE,SUPERSONIC,uu,FLIP_WINDOW} = global.__G;
+eval(src + '\n;global.__G={startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,camLook,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,carForward,updateCamera,resetKickoff,setBallCam,ARENA,WALL_R,BOOST_DRAIN,BALL_R,MAX_SPEED,MAX_DRIVE,SUPERSONIC,uu,FLIP_WINDOW};');
+const {startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,camLook,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,carForward,updateCamera,resetKickoff,setBallCam,ARENA,WALL_R,BOOST_DRAIN,BALL_R,MAX_SPEED,MAX_DRIVE,SUPERSONIC,uu,FLIP_WINDOW} = global.__G;
 
 // ---- simulate ----
 function frame(){ const fn=rafQueue.shift(); if(fn) fn(); while(pendingTimeouts.length) pendingTimeouts.shift()(); }
@@ -221,7 +221,7 @@ for(const ai of [1, 2, 3]){
   console.log('arena', ai, 'shot test — score:', game.score, 'state:', game.state);
   if(game.score[0] <= preS) throw new Error('arena '+ai+' shot did not score (pre='+preS+')');
   runFrames(60*3);
-  if(Math.abs(ball.pos.x) > 100 || Math.abs(ball.pos.z) > 60) throw new Error('arena '+ai+': ball escaped');
+  if(Math.abs(ball.pos.x) > ARENA.halfX+ARENA.goalDepth+2 || Math.abs(ball.pos.z) > ARENA.halfZ+2) throw new Error('arena '+ai+': ball escaped');
 }
 lobby.arena = 0;                          // back to the barn for the long-run tests
 game.state='lobby'; startMatch(false);
@@ -236,7 +236,7 @@ console.log('TEST B — organic goals:', (game.score[0]+game.score[1])-before, '
 for(let i=0;i<60*300 && game.state!=='end' && !game.overtime;i++) frame();
 console.log('TEST C — state:', game.state, 'timeLeft:', game.timeLeft.toFixed(1), 'overtime:', game.overtime);
 if(game.state!=='end' && !game.overtime) throw new Error('match never ended');
-if(Math.abs(ball.pos.x) > 100 || Math.abs(ball.pos.z) > 60) throw new Error('ball escaped arena');
+if(Math.abs(ball.pos.x) > ARENA.halfX+ARENA.goalDepth+2 || Math.abs(ball.pos.z) > ARENA.halfZ+2) throw new Error('ball escaped arena');
 console.log('rumble events:', rumbles);
 
 // ---- multiplayer seat table (no network involved) ----
@@ -415,8 +415,12 @@ for(const [ax, sg] of [[0,1],[0,-1],[1,1],[1,-1]]){
 }
 wc.wallAxis=null; wc.up.set(0,1,0); wc.pitch=0;
 
-// --- chase camera must stay BEHIND the car on every wall ---
+// --- CAR-CAM must stay BEHIND the car on every wall ---
 // Regression: the flipped frame put the camera in FRONT, so the car drove at you.
+// Scoped to car-cam on purpose: in BALL-cam the lens sits on the ball->car line,
+// so it is legitimately not behind the nose (the car may face any direction).
+// Ball-cam framing is covered by the "car stays on screen" test above.
+setBallCam(false);
 for(const [ax, sg] of [[0,1],[0,-1],[1,1],[1,-1]]){
   const pl = game.player;
   pl.wallAxis=ax; pl.wallSign=sg; pl.pitch=0;
@@ -456,6 +460,57 @@ game.player.wallAxis=null; game.player.up.set(0,1,0); game.player.pitch=0;
   const braked=Math.hypot(t.vel.x,t.vel.z);
   if(braked >= coast) throw new Error('braking no stronger than coasting ('+braked.toFixed(1)+' vs '+coast.toFixed(1)+')');
   console.log('braking OK — coast:'+coast.toFixed(1)+'  braked:'+braked.toFixed(1));
+}
+
+// --- the car must stay ON SCREEN (reported: lost it at the wall base / up the wall) ---
+{
+  const pl = game.player;
+  const spots = [
+    ['wall base',      ()=>{ pl.pos.set(0,0,ARENA.halfZ-WALL_R*0.5); pl.wallAxis=null; pl.up.set(0,1,0); }],
+    ['up the wall',    ()=>{ pl.pos.set(0,ARENA.wallH*0.5,ARENA.halfZ); pl.wallAxis=1; pl.wallSign=1;
+                             pl.yaw=Math.PI/2; stickToWall(pl); }],
+    ['deep corner',    ()=>{ pl.pos.set(ARENA.halfX-2, 0, ARENA.halfZ-2); pl.wallAxis=null; pl.up.set(0,1,0); }],
+    ['in the goal',    ()=>{ pl.pos.set(ARENA.halfX+4, 0, 0); pl.wallAxis=null; pl.up.set(0,1,0); }],
+  ];
+  for(const [name, place] of spots){
+    for(const mode of [true,false]){
+      setBallCam(mode);
+      pl.vel.set(0,0,0); pl.pitch=0; place();
+      ball.pos.set(0, BALL_R, 0); ball.vel.set(0,0,0);
+      camPos.copy(pl.pos); camPos.y += 3;
+      for(let i=0;i<240;i++){ place(); pl.vel.set(0,0,0); updateCamera(1/60); }
+      const vx=camLook.x-camPos.x, vy=camLook.y-camPos.y, vz=camLook.z-camPos.z;
+      const cx=pl.pos.x-camPos.x, cy=pl.pos.y-camPos.y, cz=pl.pos.z-camPos.z;
+      const vl=Math.hypot(vx,vy,vz), cl=Math.hypot(cx,cy,cz);
+      if(vl<1e-4 || cl<1e-4) throw new Error(name+': degenerate camera');
+      const ang = Math.acos(Math.max(-1,Math.min(1,(vx*cx+vy*cy+vz*cz)/(vl*cl)))) * 180/Math.PI;
+      if(ang > 35) throw new Error(name+(mode?' [ball-cam]':' [car-cam]')+
+        ': car is '+ang.toFixed(0)+'deg off the view axis — off screen');
+      // and the lens must stay inside the shell, not buried in the boards
+      if(Math.abs(camPos.z) > ARENA.halfZ + 0.5) throw new Error(name+': camera outside the side boards');
+      if(Math.abs(camPos.x) > ARENA.halfX + ARENA.goalDepth) throw new Error(name+': camera outside the ends');
+    }
+  }
+  setBallCam(true);
+  console.log('camera keeps the car on screen at the wall base, up the wall, in corners and in goal');
+}
+
+// --- kickoff must clear wall state and face the ball (reported: car sat sideways) ---
+{
+  const pl = game.player;
+  pl.pos.set(0, ARENA.wallH*0.5, ARENA.halfZ); pl.wallAxis=1; pl.wallSign=1;
+  pl.yaw=Math.PI/2; pl.pitch=0.7; stickToWall(pl);
+  resetKickoff();
+  if(pl.wallAxis !== null) throw new Error('kickoff left the car stuck to a wall');
+  if(Math.abs(pl.up.y - 1) > 1e-6) throw new Error('kickoff left the car tilted (up.y='+pl.up.y.toFixed(2)+')');
+  if(pl.pitch !== 0) throw new Error('kickoff left the nose pitched');
+  const f = carForward(pl);
+  if(Math.abs(f.y) > 1e-6) throw new Error('kickoff facing is not level');
+  // must point across the halfway line, at the ball
+  const toBall = -Math.sign(pl.pos.x);
+  if(Math.sign(f.x) !== toBall || Math.abs(f.x) < 0.9)
+    throw new Error('kickoff car is not facing the ball (fwd '+f.x.toFixed(2)+','+f.z.toFixed(2)+')');
+  console.log('kickoff resets surface state and faces the ball');
 }
 
 // --- powerslide, flip window, ceiling ---

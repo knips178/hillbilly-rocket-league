@@ -8161,6 +8161,7 @@ addEventListener('keydown', e=>{
 });
 addEventListener('keyup', e=>{ keys[e.code]=false; });
 let ballCam = true;
+function setBallCam(v){ ballCam = !!v; }   // used by the smoke harness
 
 // ---------------- GAMEPAD (PS5 DualSense & any standard pad) ----------------
 // R2 gas · L2 reverse · Left stick steer (+flip direction) · ✕ jump/flip · ◯ or R1 boost · △ ball-cam · OPTIONS pause/start
@@ -8953,6 +8954,11 @@ function resetKickoff(){
     for(const c of cars){ if(c.team!==team) continue;
       const s = spots[i%spots.length]; i++;
       c.pos.set(s.x, 0, s.z); c.vel.set(0,0,0); c.yaw = s.yaw;
+      // Wipe the surface state too. Score while ya were up a wall and the car kept
+      // its wall normal through the reset — it sat sideways on the kickoff line and
+      // `yaw` was being read in the WALL frame, so it faced off at an angle.
+      c.wallAxis = null; c.wallSign = 1; c.up.set(0,1,0); c.pitch = 0;
+      c.flipT = 0; c.jumpHoldT = 0; c.slideT = 0;
       c.onGround=true; c.jumps=2; c.flip=0; c.boost = Math.max(c.boost, 33);
       c.dead=0; c.mesh.visible=true; c.tag.visible=true;
       c.mesh.position.copy(c.pos); c.mesh.rotation.set(0,c.yaw,0);
@@ -10035,6 +10041,29 @@ const CAM_DIST = uu(270), CAM_HEIGHT = uu(100);   // RL boom + height
 // RL "stiffness": the boom lengthens as ya speed up so the camera falls behind —
 // the spec calls this the primary speed feedback. ~25% longer flat out.
 const CAM_ZOOM = uu(70);
+// How long the boom can be before the camera would punch through the shell.
+// RL pulls the arm IN near walls; it never slides the camera off the line, which
+// is what used to drop the car out of frame at the wall base and up on the wall.
+function fitBoom(car, dirv, maxLen, inGoal){
+  const m = uu(220);
+  const lx = (inGoal ? ARENA.halfX + ARENA.goalDepth : ARENA.halfX) - m;
+  // Only squeeze to the goal mouth when the car is ACTUALLY in the recess. Testing
+  // x alone also caught cars merely near the end wall (z far outside the mouth) and
+  // crushed the boom to its minimum — that's what buried the lens in the car at the
+  // base of the end walls.
+  const reallyInGoal = Math.abs(car.x) > ARENA.halfX - m && Math.abs(car.z) < ARENA.goalHalfW;
+  const lz = (reallyInGoal ? ARENA.goalHalfW : ARENA.halfZ) - m;
+  const ly = ARENA.ceil - m, lyMin = uu(60);
+  let t = maxLen;
+  const lim = (c, d, hi, lo)=>{
+    if(d >  1e-6) t = Math.min(t, (hi - c)/d);
+    else if(d < -1e-6) t = Math.min(t, (lo - c)/d);
+  };
+  lim(car.x, dirv.x, lx, -lx);
+  lim(car.z, dirv.z, lz, -lz);
+  lim(car.y, dirv.y, ly, lyMin);
+  return Math.max(uu(140), Math.min(maxLen, t));
+}
 function camBoom(p){
   const sp = Math.hypot(p.vel.x, p.vel.y, p.vel.z);
   return CAM_DIST + CAM_ZOOM * THREE.MathUtils.clamp(sp / SUPERSONIC, 0, 1);
@@ -10045,77 +10074,59 @@ function updateCamera(dt){
   const p = game.player; if(!p) return;
   let want, lookTarget;
 
-  // ---- wall-riding camera ----
-  // RL rule (verified): the camera does NOT roll with the car — it stays world-up.
-  // The trick that makes it readable is WHERE it sits: off the wall and behind the
-  // car along the surface, looking up the wall at it, rather than pinned above it
-  // near the ceiling. camera.up is never touched, so there's no nauseating roll.
-  if(p.wallAxis !== null){
-    const n = p.up;                                   // surface normal, pointing into the pitch
-    const fwd = carForward(p);                        // up / along the wall
-    want = p.pos.clone()
-      .addScaledVector(fwd, -camBoom(p)*0.65)         // drop behind the car along the wall
-      .addScaledVector(n, CAM_HEIGHT + 5);            // and pull off the wall into the arena
-    // don't let it sink through the floor or punch the ceiling
-    want.y = THREE.MathUtils.clamp(want.y, 2.5, ARENA.ceil - 3);
-    want.x = THREE.MathUtils.clamp(want.x, -(ARENA.halfX-2.5), ARENA.halfX-2.5);
-    want.z = THREE.MathUtils.clamp(want.z, -(ARENA.halfZ-2.5), ARENA.halfZ-2.5);
-    lookTarget = ballCam ? ball.pos.clone() : p.pos.clone();
-    lookTarget.lerp(p.pos, 0.5);                      // keep the car firmly in frame
-    camPos.lerp(want, 1 - Math.exp(-9 * dt));
-    camera.position.copy(camPos);
-    camLook.lerp(lookTarget, 1 - Math.exp(-11 * dt));
-    camera.lookAt(camLook);
-    const pspd2 = Math.hypot(p.vel.x, p.vel.y, p.vel.z);
-    const fovW = 80 + THREE.MathUtils.clamp((pspd2 - 38) / 28, 0, 1) * 9;
-    if(Math.abs(camera.fov - fovW) > 0.02){ camera.fov += (fovW - camera.fov)*Math.min(1,6*dt); camera.updateProjectionMatrix(); }
-    updateXray(p.pos, dt);
-    if(camShake > 0){ camera.position.x += (Math.random()-0.5)*camShake*2.2; camera.position.y += (Math.random()-0.5)*camShake*2.2;
-      camShake = Math.max(0, camShake - dt*1.6); }
-    return;
-  }
-
+  // ---- wall-riding note ----
+  // There is deliberately NO separate wall camera. A bespoke one placed the lens
+  // "behind along the surface" while still LOOKING at the ball, which on a wall put
+  // the car 167 degrees off the view axis — i.e. behind you, off screen. The single
+  // path below always sits on the ball->car line, so the car is between the lens and
+  // the ball on every surface; wall-riding just adds a push off the surface.
+  const inGoalNow = Math.abs(p.pos.x) > ARENA.halfX - 1 && Math.abs(p.pos.z) < ARENA.goalHalfW - 1;
+  let off;
   if(ballCam){
-    // car stays between camera and ball; look at the ball
+    // sit on the ball->car line, behind the car, so the car is ALWAYS between the
+    // lens and the ball — that's what keeps it on screen no matter where ya are
     const dir = p.pos.clone().sub(ball.pos); dir.y = 0;
     if(dir.lengthSq()<0.01) dir.set(0,0,1);
     dir.normalize();
-    want = p.pos.clone().addScaledVector(dir, camBoom(p));
-    want.y = p.pos.y + CAM_HEIGHT;
+    off = dir.multiplyScalar(camBoom(p));
     lookTarget = ball.pos.clone();
   } else {
     const f = carForward(p);
-    want = p.pos.clone().addScaledVector(f, -camBoom(p));
-    want.y = p.pos.y + CAM_HEIGHT;
-    lookTarget = p.pos.clone().addScaledVector(f, 18); lookTarget.y += 2;
+    off = f.clone().multiplyScalar(-camBoom(p));
+    lookTarget = p.pos.clone().addScaledVector(f, uu(1100)); lookTarget.y += uu(120);
   }
-  // The camera needs room to pull back. Pinning it to the touchline squeezed it right on top of the
-  // car in corners — the car dropped out of frame and you were guessing which way you pointed. The
-  // barn is much bigger than the pitch, so let it retreat past the sideline and ride up over the
-  // hay bales; ends stay clamped (the barn wall is right there).
-  // Drive it into the barn door and the camera used to jam at the goal mouth, in FRONT of the car,
-  // staring back out at the ball — the rig sat off the bottom of the screen (measured NDC y -3.07).
-  // When yer in the goal the camera follows you into the recess and works in that little room.
-  const inGoal = Math.abs(p.pos.x) > ARENA.halfX - 1 && Math.abs(p.pos.z) < ARENA.goalHalfW - 1;
-  const CAM_OUT = 18;                                   // how far past the touchline it may retreat
-  const camMaxX = inGoal ? ARENA.halfX + ARENA.goalDepth - 2.5 : ARENA.halfX - 2.5;
-  want.x = THREE.MathUtils.clamp(want.x, -camMaxX, camMaxX);
-  const camInGoal = Math.abs(want.x) > ARENA.halfX - 1;
-  if(camInGoal){
-    want.z = THREE.MathUtils.clamp(want.z, -(ARENA.goalHalfW-1.5), ARENA.goalHalfW-1.5);
-  } else {
-    want.z = THREE.MathUtils.clamp(want.z, -(ARENA.halfZ+CAM_OUT), ARENA.halfZ+CAM_OUT);
-    if(Math.abs(want.z) > ARENA.halfZ) want.y = Math.max(want.y, 9);   // clear the hay-bale boards
+  // Raise the lens along the SURFACE normal, not world-Y. Setting off.y absolutely
+  // wiped the "behind the car" component on a wall (forward points straight up there),
+  // which parked the camera in front of ya.
+  const camUp = p.wallAxis !== null ? new THREE.Vector3(p.up.x, p.up.y, p.up.z)
+                                    : new THREE.Vector3(0,1,0);
+  if(p.wallAxis !== null){
+    // On a wall, "behind the car, away from the ball" usually points INTO the wall —
+    // the ball is out in the middle and the surface normal aims right at it. Following
+    // it put the lens on the ball's side of the car, i.e. the car ended up behind you.
+    // Slide the offset along the surface instead, and if it's aimed dead into the wall,
+    // drop DOWN the wall so ya look up at yer rig with the ball beyond it.
+    const into = off.dot(camUp);
+    if(into < 0) off.addScaledVector(camUp, -into);
+    if(off.lengthSq() < 1e-3){
+      const climb = new THREE.Vector3(0,1,0).addScaledVector(camUp, -camUp.y);
+      if(climb.lengthSq() < 1e-6) climb.set(0,0,1);
+      off.copy(climb.normalize().multiplyScalar(-camBoom(p)));
+    }
+    off.addScaledVector(camUp, uu(430));                          // clear of the surface
   }
-  // Whatever pull-back the clamp still steals (deep corners), trade for height and lean the gaze
-  // toward the car so it stays on screen instead of straight below the lens.
-  const lost = Math.max(0, CAM_DIST - Math.hypot(want.x - p.pos.x, want.z - p.pos.z));
-  if(lost > 0.5){
-    want.y += lost * 0.3;                                             // rise a little...
-    lookTarget.lerp(p.pos, Math.min(0.85, (lost / CAM_DIST) * 2.0));  // ...and mostly look AT the car
-  }
-  // low ceiling in the goal recess, else the barn's
-  want.y = THREE.MathUtils.clamp(want.y, 2.2, camInGoal ? ARENA.goalH-1.5 : ARENA.ceil-3);
+  off.addScaledVector(camUp, CAM_HEIGHT);
+  const oLen = Math.max(1e-4, off.length());
+  const oDir = off.multiplyScalar(1/oLen);
+  const fit = fitBoom(p.pos, oDir, oLen, inGoalNow);
+  want = p.pos.clone().addScaledVector(oDir, fit);
+  // arm badly shortened (deep corner, goal mouth)? lean the gaze onto the car so
+  // ya can still read which way yer pointed
+  const squeeze = 1 - fit/oLen;
+  if(squeeze > 0.15) lookTarget.lerp(p.pos, Math.min(0.8, squeeze));
+
+  const inGoal = inGoalNow;
+  const lost = Math.max(0, oLen - fit);
   // Stiffness scales with how badly the clamp is starving the shot: `lost` peaks in the corners, and
   // in the goal there's barely room to pull back. Those are exactly the spots you can't see yer rig,
   // so the camera quits easing and hustles instead of crawling over ~0.4s.
@@ -10130,6 +10141,23 @@ function updateCamera(dt){
   camera.position.copy(camPos);
   // smoothed swivel instead of snap-look
   camLook.lerp(lookTarget, 1 - Math.exp(-lookRate * dt));
+  // ---- KEEP THE CAR IN SHOT (the guarantee) ----
+  // Sometimes ya simply can't sit behind the car AND stare at the ball: up a wall,
+  // "behind" is inside the wall, so aiming at the ball aims away from yer rig. Rather
+  // than pick one, swing the aim toward the car until it's comfortably inside the
+  // frustum. Applied to the SMOOTHED aim against the real lens position, so it's what
+  // ya actually see — correcting the target instead just lagged behind.
+  // Free in normal play (the car already sits on the ball line); this is what stops ya
+  // losing the car on walls and at the base of them.
+  {
+    const vL = camLook.clone().sub(camPos), vC = p.pos.clone().sub(camPos);
+    const lL = vL.length(), lC = vC.length();
+    if(lL > 1e-4 && lC > 1e-4){
+      const ang = Math.acos(THREE.MathUtils.clamp(vL.dot(vC)/(lL*lC), -1, 1)) * 180/Math.PI;
+      const LIMIT = 18;                                  // well inside the ~40° half-FOV
+      if(ang > LIMIT) camLook.lerp(p.pos, Math.min(1, (ang - LIMIT)/ang + 0.08));
+    }
+  }
   const lk = camLook.clone(); lk.y += 1.2; // slight downward angle (~RL -3°)
   camera.lookAt(lk);
   // speed widens the lens (RL-style FOV kick): 80° cruising, up to ~89° flat-out with boost
