@@ -10082,6 +10082,7 @@ function camBoom(p){
 }
 const camPos = new THREE.Vector3(0,40,90);
 const camLook = new THREE.Vector3(0,0,0);
+const camAim  = new THREE.Vector3(0,0,0);   // the final look point actually rendered
 function updateCamera(dt){
   const p = game.player; if(!p) return;
   let want, lookTarget;
@@ -10153,29 +10154,39 @@ function updateCamera(dt){
   camera.position.copy(camPos);
   // smoothed swivel instead of snap-look
   camLook.lerp(lookTarget, 1 - Math.exp(-lookRate * dt));
+
+  // Everything below works on a THROWAWAY aim. `camLook` stays a clean, smoothed
+  // track of the target — the earlier version mutated it here, which fed the
+  // correction back into next frame's smoothing and made the view oscillate
+  // around the threshold (the reported "shaking sitting still").
+  const lk = camLook.clone();
+
   // ---- KEEP THE CAR IN SHOT (the guarantee) ----
-  // Sometimes ya simply can't sit behind the car AND stare at the ball: up a wall,
-  // "behind" is inside the wall, so aiming at the ball aims away from yer rig. Rather
-  // than pick one, swing the aim toward the car until it's comfortably inside the
-  // frustum. Applied to the SMOOTHED aim against the real lens position, so it's what
-  // ya actually see — correcting the target instead just lagged behind.
-  // Free in normal play (the car already sits on the ball line); this is what stops ya
-  // losing the car on walls and at the base of them.
+  // Sometimes ya can't sit behind the car AND stare at the ball: up a wall, "behind"
+  // is inside the wall, so aiming at the ball aims away from yer rig. Swing the aim
+  // toward the car until it's comfortably inside the frustum. Pure function of this
+  // frame — no feedback, so it can't jitter.
   {
-    const vL = camLook.clone().sub(camPos), vC = p.pos.clone().sub(camPos);
-    const lL = vL.length(), lC = vC.length();
-    if(lL > 1e-4 && lC > 1e-4){
+    const LIMIT = 22;                                    // well inside the ~40° half-FOV
+    const vC = p.pos.clone().sub(camPos), lC = vC.length();
+    // halve the aim toward the car until it's within LIMIT — moving the aim point
+    // toward the car reduces the off-axis angle monotonically, so a few steps
+    // converge. Bounded loop, pure function of this frame → never jitters.
+    for(let it = 0; it < 8; it++){
+      const vL = lk.clone().sub(camPos), lL = vL.length();
+      if(lL < 1e-4 || lC < 1e-4) break;
       const ang = Math.acos(THREE.MathUtils.clamp(vL.dot(vC)/(lL*lC), -1, 1)) * 180/Math.PI;
-      const LIMIT = 18;                                  // well inside the ~40° half-FOV
-      if(ang > LIMIT) camLook.lerp(p.pos, Math.min(1, (ang - LIMIT)/ang + 0.08));
+      if(ang <= LIMIT) break;
+      lk.lerp(p.pos, 0.5);
     }
   }
+
   // RL's downward camera angle (~-4°), computed from the actual boom geometry so it
   // holds at any scale. The old code raised the aim by a fixed 1.2 world units, which
   // at RL scale tilted the view UP into the rafters — that's why ya couldn't see ahead.
-  const lk = camLook.clone();
   const horiz = Math.hypot(lk.x - camera.position.x, lk.z - camera.position.z);
   lk.y -= horiz * 0.075;                    // tan(~4.3°)
+  camAim.copy(lk);
   camera.lookAt(lk);
   // speed widens the lens (RL-style FOV kick): 80° cruising, up to ~89° flat-out with boost
   const pspd = Math.hypot(p.vel.x, p.vel.z);

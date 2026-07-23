@@ -108,8 +108,8 @@ Object.defineProperty(global, 'navigator', { value: { getGamepads: ()=>[fakePad]
 // ---- load game ----
 const fs=require('fs');
 const src=fs.readFileSync('/tmp/game.js','utf8');
-eval(src + '\n;global.__G={startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,camLook,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,carForward,updateCamera,resetKickoff,setBallCam,ARENA,WALL_R,BOOST_DRAIN,BALL_R,MAX_SPEED,MAX_DRIVE,SUPERSONIC,uu,FLIP_WINDOW};');
-const {startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,camLook,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,carForward,updateCamera,resetKickoff,setBallCam,ARENA,WALL_R,BOOST_DRAIN,BALL_R,MAX_SPEED,MAX_DRIVE,SUPERSONIC,uu,FLIP_WINDOW} = global.__G;
+eval(src + '\n;global.__G={startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,camLook,camAim,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,carForward,updateCamera,resetKickoff,setBallCam,ARENA,WALL_R,BOOST_DRAIN,BALL_R,MAX_SPEED,MAX_DRIVE,SUPERSONIC,uu,FLIP_WINDOW};');
+const {startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,camLook,camAim,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,carForward,updateCamera,resetKickoff,setBallCam,ARENA,WALL_R,BOOST_DRAIN,BALL_R,MAX_SPEED,MAX_DRIVE,SUPERSONIC,uu,FLIP_WINDOW} = global.__G;
 
 // ---- simulate ----
 function frame(){ const fn=rafQueue.shift(); if(fn) fn(); while(pendingTimeouts.length) pendingTimeouts.shift()(); }
@@ -498,7 +498,7 @@ game.player.wallAxis=null; game.player.up.set(0,1,0); game.player.pitch=0;
       ball.pos.set(0, BALL_R, 0); ball.vel.set(0,0,0);
       camPos.copy(pl.pos); camPos.y += 3;
       for(let i=0;i<240;i++){ place(); pl.vel.set(0,0,0); updateCamera(1/60); }
-      const vx=camLook.x-camPos.x, vy=camLook.y-camPos.y, vz=camLook.z-camPos.z;
+      const vx=camAim.x-camPos.x, vy=camAim.y-camPos.y, vz=camAim.z-camPos.z;
       const cx=pl.pos.x-camPos.x, cy=pl.pos.y-camPos.y, cz=pl.pos.z-camPos.z;
       const vl=Math.hypot(vx,vy,vz), cl=Math.hypot(cx,cy,cz);
       if(vl<1e-4 || cl<1e-4) throw new Error(name+': degenerate camera');

@@ -167,6 +167,13 @@ ball-cam, behind the nose in car-cam), then:
    axis. Up a wall ya genuinely cannot sit behind the car AND stare at the ball, so this frames both.
    Applied to the SMOOTHED aim against the real lens position — correcting the target just lagged.
 
+**No feedback in the aim.** `camLook` is a clean smoothed track of the target and is NEVER mutated
+by the framing correction — an earlier version did `camLook.lerp(car)` in place, which fed back into
+next frame's smoothing and made the view oscillate around the threshold (reported as "shaking sitting
+still"; it settles in a throttled preview but shakes at 60-120fps). The keep-in-shot correction and
+the down-angle now work on a THROWAWAY `lk`, exposed as `camAim` for tests. The correction converges
+by halving `lk` toward the car (bounded loop, pure function of the frame), so it can't jitter.
+
 Harness pins it: the car must be <35 deg off the view axis at the wall base, up a wall, in a deep
 corner and inside the goal, in BOTH camera modes. `setBallCam()` exists so tests can switch mode
 (the game's `let ballCam` isn't assignable from the harness).
