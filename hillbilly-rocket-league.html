@@ -5016,6 +5016,11 @@ const ARENA = { halfX: 82, halfZ: 52, wallH: 26, ceil: 38, goalHalfW: 18, goalH:
 const BALL_R0 = 4.4;
 let BALL_R = 4.4;                       // live radius — Maw's "HAWG BALL" wildcard swells it
 const GRAV_CAR = -34, GRAV_BALL = -24;
+const BOOST_DRAIN = 22;   // was 28 — turbo lasts a little longer now (full tank ~4.5s vs ~3.6s)
+// Curved wall-base fillets: cars grab a wall and ride up it (see updateCar).
+const WALL_R = 16;            // fillet radius where wall meets floor
+const WALL_CLIMB_MIN = 26;    // speed you need, aimed into a wall, to grab it
+const UP_Y = { x:0, y:1, z:0 };
 const CAR_COLL_R = 3.0;
 const SUPERSONIC = 46;
 // live gameplay-modifier multipliers (Maw's Wildcards bend these; 1 = normal)
@@ -6100,6 +6105,7 @@ function applyArena(i){
   goalBogDecor.visible = L.boards==='bog';
   goalMarshDecor.visible = L.boards==='marsh';
   if(mud.material && mud.material.color && mud.material.color.setHex) mud.material.color.setHex(L.outer);
+  if(wallRampMat && wallRampMat.color && wallRampMat.color.setHex) wallRampMat.color.setHex(L.ramp || L.ground || 0x6a5a3a);
   setAmbience(L.amb || 'none');
   setWeather(L.weather);
 }
@@ -6117,6 +6123,41 @@ scene.add(mud);
 // Grouped so outdoor venues (bog, marsh) can hide the whole barn and play under open sky.
 const barnShell = new THREE.Group();
 scene.add(barnShell);
+
+// ---- curved wall bases (the quarter-pipes you ride up) ----
+// Built straight from the same fillet arc the physics uses, so the ramp you SEE
+// is the surface the car actually climbs. Present in every arena; tinted per
+// venue in applyArena. Guarded so the headless harness (no BufferGeometry) skips it.
+const wallRamps = new THREE.Group();
+let wallRampMat = null;
+scene.add(wallRamps);
+if(typeof THREE.BufferGeometry === 'function' && typeof THREE.Float32BufferAttribute === 'function'){
+  wallRampMat = new THREE.MeshLambertMaterial({ color:0x6a5a3a, side:THREE.DoubleSide });
+  const buildFillet = (axis, sign, aA, aB)=>{
+    const N = 12, pos = [], idx = [];
+    const half = axis===0 ? ARENA.halfX : ARENA.halfZ;
+    for(let i=0;i<=N;i++){
+      const phi = (i/N)*(Math.PI/2), s = Math.sin(phi), co = Math.cos(phi);
+      const perp = sign*(half - WALL_R + WALL_R*s), py = WALL_R - WALL_R*co;
+      for(const along of [aA, aB]){
+        if(axis===0) pos.push(perp, py, along); else pos.push(along, py, perp);
+      }
+    }
+    for(let i=0;i<N;i++){ const a=i*2, b=i*2+1, c=(i+1)*2, d=(i+1)*2+1; idx.push(a,b,c, b,d,c); }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx); g.computeVertexNormals();
+    const m = new THREE.Mesh(g, wallRampMat); m.receiveShadow = true; wallRamps.add(m);
+  };
+  const gm = ARENA.goalHalfW + 1;
+  // ±X walls in two pieces so we don't ramp across the goal mouths
+  for(const sgn of [1,-1]){
+    buildFillet(0, sgn, -ARENA.halfZ, -gm);
+    buildFillet(0, sgn,  gm,  ARENA.halfZ);
+    buildFillet(1, sgn, -ARENA.halfX, ARENA.halfX);
+  }
+}
+
 const plankMat = new THREE.MeshLambertMaterial({ map: barnPlankTex, side:THREE.DoubleSide });
 const beamMat  = new THREE.MeshLambertMaterial({ color:0x3a2817 });
 const SHELL_X = ARENA.halfX + 8, SHELL_Z = ARENA.halfZ + 30, EAVE_H = 42, RIDGE = 60;
@@ -7195,6 +7236,7 @@ function makeCar(name, team, vehIdx, isPlayer){
     smokeT: 0, dead: 0,
     pos:new THREE.Vector3(), vel:new THREE.Vector3(), yaw:0,
     onGround:true, jumps:2, boost:33, flip:0, flipDir:0, rollVis:0, steerVis:0,
+    up:new THREE.Vector3(0,1,0), wallAxis:null, wallSign:1,   // surface normal for wall-riding
     aiTimer:Math.random()*2, aiJumpCd:0, goals:0, touches:0, demos:0,
     specialCd:0, spinT:0, shineT:0, stewT:0, demoStreak:0, demoStreakT:0, aiSpecialCd:2+Math.random()*3,
     persona: isPlayer ? null : PERSONAS[Math.floor(Math.random()*PERSONAS.length)],
@@ -7202,7 +7244,93 @@ function makeCar(name, team, vehIdx, isPlayer){
   cars.push(car);
   return car;
 }
-function carForward(c){ return new THREE.Vector3(Math.sin(c.yaw), 0, Math.cos(c.yaw)); }
+// ---- CURVED WALLS (drive up 'em, RL-style) ----
+// A car carries a surface normal `c.up`; while it's grabbing a wall its motion
+// happens in that surface's tangent plane and gravity pulls it back down toward
+// the floor. Flat-floor driving (up = +Y) is byte-identical to before.
+// (WALL_R / WALL_CLIMB_MIN / UP_Y are declared up with the arena constants so the
+//  visual ramp meshes, built earlier in the file, can reference them.)
+
+// Forward respects the surface normal, so steering/throttle work on any wall.
+// On the floor it returns exactly the old flat forward.
+function carForward(c){
+  const up = c.up || UP_Y;
+  const sy = Math.sin(c.yaw), cy = Math.cos(c.yaw);
+  if(up.x===0 && up.y===1 && up.z===0) return new THREE.Vector3(sy, 0, cy);
+  // tangent t = Z − (Z·up)up (fallback X near the poles); right = up × t
+  const d = up.z;
+  let tx = -d*up.x, ty = -d*up.y, tz = 1 - d*up.z;
+  let tl = Math.hypot(tx,ty,tz);
+  if(tl < 1e-4){ tx=1; ty=0; tz=0; tl=1; }
+  tx/=tl; ty/=tl; tz/=tl;
+  const rx = up.y*tz - up.z*ty, ry = up.z*tx - up.x*tz, rz = up.x*ty - up.y*tx;
+  return new THREE.Vector3(sy*rx + cy*tx, sy*ry + cy*ty, sy*rz + cy*tz);
+}
+
+// Nearest point of the {floor → fillet → wall} cross-section for a car whose
+// distance toward the wall plane is p (plane at p = half) at height y. Snapping
+// to the NEAREST point is what turns inward momentum into a climb up the curve.
+// nPerp is the inward normal along the p-axis (toward the pitch is negative p).
+function projectWall(p, y, half){
+  const cp = half - WALL_R, cy = WALL_R;       // fillet centre in (p, y)
+  if(y >= WALL_R)                              // up on the vertical wall (height decides, not p)
+    return { p: half, y: Math.min(ARENA.wallH, y), nPerp: -1, nY: 0 };
+  if(p <= cp)                                   // out on the floor
+    return { p, y: 0, nPerp: 0, nY: 1 };
+  const dp = p - cp, dy = y - cy;              // on the fillet (dy ≤ 0)
+  let phi = Math.atan2(dp, -dy);               // 0 at the floor edge → π/2 at the wall
+  if(phi < 0) phi = 0; else if(phi > Math.PI/2) phi = Math.PI/2;
+  const s = Math.sin(phi), co = Math.cos(phi);
+  return { p: cp + WALL_R*s, y: cy - WALL_R*co, nPerp: -s, nY: co };
+}
+
+// Glue an attached car to its wall: project onto the curved surface, set the
+// normal, and scrub velocity into the surface so momentum rolls along the curve.
+function stickToWall(c){
+  const axis = c.wallAxis, sign = c.wallSign;
+  const half = axis===0 ? ARENA.halfX : ARENA.halfZ;
+  const p = sign * (axis===0 ? c.pos.x : c.pos.z);      // distance toward the wall
+  const r = projectWall(p, c.pos.y, half);
+  if(axis===0) c.pos.x = sign * r.p; else c.pos.z = sign * r.p;
+  c.pos.y = r.y;
+  if(!c.up) c.up = { x:0, y:1, z:0 };
+  c.up.x = c.up.y = c.up.z = 0;
+  c.up[axis===0 ? 'x' : 'z'] = sign * r.nPerp;           // world inward normal
+  c.up.y = r.nY;
+  const vn = c.vel.x*c.up.x + c.vel.y*c.up.y + c.vel.z*c.up.z;
+  c.vel.x -= vn*c.up.x; c.vel.y -= vn*c.up.y; c.vel.z -= vn*c.up.z;
+}
+
+// Client-side: remote snapshots carry only pos/yaw/vel, so recover which wall a
+// car is on straight from where it is (no extra bytes on the wire).
+function deriveUp(c){
+  if(!c.up) c.up = { x:0, y:1, z:0 };
+  const y = c.pos.y;
+  if(y < 0.2){ c.up.x=0; c.up.y=1; c.up.z=0; c.wallAxis=null; return; }
+  const dxp = ARENA.halfX - Math.abs(c.pos.x), dzp = ARENA.halfZ - Math.abs(c.pos.z);
+  let axis, sign;
+  if(dxp <= dzp && dxp < WALL_R + 3 && Math.abs(c.pos.z) > ARENA.goalHalfW){ axis=0; sign=Math.sign(c.pos.x)||1; }
+  else if(dzp < WALL_R + 3){ axis=1; sign=Math.sign(c.pos.z)||1; }
+  else { c.up.x=0; c.up.y=1; c.up.z=0; c.wallAxis=null; return; }
+  const half = axis===0 ? ARENA.halfX : ARENA.halfZ;
+  const r = projectWall(sign*(axis===0?c.pos.x:c.pos.z), y, half);
+  c.up.x=c.up.y=c.up.z=0; c.up[axis===0?'x':'z']=sign*r.nPerp; c.up.y=r.nY;
+  c.wallAxis=axis; c.wallSign=sign;
+}
+
+// Orient the body to lie on its surface. Returns false on the flat floor (caller
+// keeps the existing euler/spin path) or when matrices aren't available (harness).
+function orientCarMesh(c){
+  const up = c.up || UP_Y;
+  if(up.x===0 && up.y===1 && up.z===0) return false;
+  if(typeof THREE.Matrix4 !== 'function' || !c.mesh.quaternion) return false;
+  const f = carForward(c);
+  const upv = new THREE.Vector3(up.x, up.y, up.z);
+  const right = new THREE.Vector3().crossVectors(upv, f).normalize();
+  const m = new THREE.Matrix4().makeBasis(right, upv, f);   // local +Z = forward, +Y = up
+  c.mesh.quaternion.setFromRotationMatrix(m);
+  return true;
+}
 
 // spawn positions per team (facing center)
 function kickoffSpots(team){
@@ -7922,7 +8050,14 @@ if(typeof navigator!=='undefined') addEventListener('gamepadconnected', ()=>{
 function tryJump(c){
   if(game.paused) return;
   if(c.onGround){
-    c.vel.y = 14; c.onGround=false; c.jumps=1; beep(220,0.08,'square',0.06);
+    if(c.wallAxis !== null){
+      // leap off the wall along its normal, then fall free
+      c.vel.x += c.up.x*16; c.vel.y += c.up.y*16 + 6; c.vel.z += c.up.z*16;
+      c.wallAxis = null; c.up.set(0,1,0);
+    } else {
+      c.vel.y = 14;
+    }
+    c.onGround=false; c.jumps=1; beep(220,0.08,'square',0.06);
   } else if(c.jumps>0 && c.flip<=0){
     c.jumps=0;
     // flip: direction from steering keys, default forward
@@ -7953,6 +8088,7 @@ function updateCar(c, dt, input){
       const s = pick(kickoffSpots(c.team));
       c.pos.set(s.x, 0, s.z); c.vel.set(0,0,0); c.yaw = s.yaw;
       c.boost = 33; c.onGround = true; c.jumps = 2; c.flip = 0;
+      c.wallAxis = null; c.up.set(0,1,0);
       c.mesh.visible = true; c.tag.visible = true;
       c.mesh.position.copy(c.pos); c.mesh.rotation.set(0, c.yaw, 0);
     }
@@ -7975,22 +8111,27 @@ function updateCar(c, dt, input){
   const canBoost = input.boost && (c.boost > 0 || freeB);
   const topM = SURF.top * topMul * (shine ? 1.25 : 1);
 
+  const attached = c.onGround && c.wallAxis !== null;   // riding a wall right now
   if(c.onGround){
-    // throttle
+    // throttle (along the surface tangent — f already respects c.up)
     let throttle = input.throttle;
     const fwdSpeed = c.vel.dot(f);
     let max = v.top * topM + (canBoost ? 16 : 0);
     c.vel.x += f.x * v.accel * SURF.accel * throttle * dt;
+    c.vel.y += f.y * v.accel * SURF.accel * throttle * dt;
     c.vel.z += f.z * v.accel * SURF.accel * throttle * dt;
     if(canBoost){
-      c.vel.x += f.x*30*dt; c.vel.z += f.z*30*dt;
-      if(!freeB) c.boost = Math.max(0, c.boost - 28*dt);
+      c.vel.x += f.x*30*dt; c.vel.y += f.y*30*dt; c.vel.z += f.z*30*dt;
+      if(!freeB) c.boost = Math.max(0, c.boost - BOOST_DRAIN*dt);
     }
-    // steering (need speed)
-    const spd = Math.hypot(c.vel.x, c.vel.z);
+    // on a wall, gravity still pulls ya toward the floor; the normal component
+    // gets scrubbed by stickToWall, so what's left drags ya back down the wall
+    if(attached) c.vel.y += GRAV_CAR * gravCarMul * dt;
+    // steering (need speed) — rotates about the surface normal via yaw
+    const spd = Math.hypot(c.vel.x, c.vel.y, c.vel.z);
     const dir = fwdSpeed>=0?1:-1;
     c.yaw += input.steer * v.turn * dt * Math.min(1, spd/14) * dir;
-    // lateral friction
+    // lateral friction (vector math, so it already works in any tangent plane)
     const nf = carForward(c);
     const fwdComp = c.vel.dot(nf);
     const latV = c.vel.clone().sub(nf.clone().multiplyScalar(fwdComp));
@@ -8000,9 +8141,10 @@ function updateCar(c, dt, input){
     const eGrip = SURF.grip * gripMul;
     const drag = (throttle===0 ? 1.8 : 0.35) * (eGrip < 1 ? eGrip*2 : 1);
     c.vel.x -= c.vel.x*drag*dt; c.vel.z -= c.vel.z*drag*dt;
-    // clamp
-    const s2 = Math.hypot(c.vel.x,c.vel.z);
-    if(s2>max){ c.vel.x *= max/s2; c.vel.z *= max/s2; }
+    if(attached) c.vel.y -= c.vel.y*drag*dt;
+    // clamp (3D so climbing speed counts too)
+    const s2 = Math.hypot(c.vel.x, c.vel.y, c.vel.z);
+    if(s2>max){ const k=max/s2; c.vel.x*=k; c.vel.y*=k; c.vel.z*=k; }
   } else {
     // air: gravity, slight air steer, and boost that LIFTS ya (aerials!) as well as pushes
     c.vel.y += GRAV_CAR * gravCarMul * dt;
@@ -8010,7 +8152,7 @@ function updateCar(c, dt, input){
     if(canBoost){
       c.vel.x += f.x*17*dt; c.vel.z += f.z*17*dt;
       c.vel.y += 45*dt;                                   // beats gravity (34) so holding boost CLIMBS — aerials!
-      if(!freeB) c.boost = Math.max(0, c.boost - 28*dt);
+      if(!freeB) c.boost = Math.max(0, c.boost - BOOST_DRAIN*dt);
     }
   }
 
@@ -8018,33 +8160,67 @@ function updateCar(c, dt, input){
 
   c.pos.addScaledVector(c.vel, dt);
 
-  // ground
-  if(c.pos.y <= 0){
-    if(c.vel.y < -14){
-      thump(Math.min(1, -c.vel.y/30));
-      const n = 12 + Math.min(20, (-c.vel.y/3)|0);   // dust ring spreads outward, bigger on harder landings
-      for(let k=0;k<n;k++){ const a=Math.random()*Math.PI*2, r=1+Math.random()*3.5;
-        spawnPart(c.pos.x+Math.cos(a)*r, 0.3, c.pos.z+Math.sin(a)*r,
-          Math.cos(a)*(4+Math.random()*7), 1+Math.random()*3, Math.sin(a)*(4+Math.random()*7),
-          Math.random()<0.7?0x9a7a52:0x6a4a28, 0.5+Math.random()*0.35, 0.7+Math.random()*0.6); }
+  if(attached){
+    // ---- riding a wall ----
+    const half = c.wallAxis===0 ? ARENA.halfX : ARENA.halfZ;
+    const p = c.wallSign * (c.wallAxis===0 ? c.pos.x : c.pos.z);   // distance toward the wall
+    const openMouth = c.wallAxis===0 && Math.abs(c.pos.z) < ARENA.goalHalfW;
+    if(p <= half - WALL_R - 0.5 || openMouth){
+      // rolled back off the fillet onto the floor (or hit a goal opening) — let go
+      c.wallAxis = null; c.up.set(0,1,0); if(c.pos.y < 0.1) c.pos.y = 0;
+    } else {
+      if(c.pos.y >= ARENA.wallH){ c.pos.y = ARENA.wallH; c.vel.y = Math.min(0, c.vel.y); }
+      // keep the lateral coord inside the playfield
+      const lateral = c.wallAxis===0 ? c.pos.z : c.pos.x;
+      const latMax = c.wallAxis===0 ? ARENA.halfZ - 2 : ARENA.halfX - 2;
+      if(lateral >  latMax){ if(c.wallAxis===0) c.pos.z= latMax; else c.pos.x= latMax; }
+      if(lateral < -latMax){ if(c.wallAxis===0) c.pos.z=-latMax; else c.pos.x=-latMax; }
+      stickToWall(c);
     }
-    c.pos.y = 0; c.vel.y = 0;
-    if(!c.onGround){ c.onGround = true; c.jumps = 2; c.flip = 0; }
-  } else if (c.pos.y > 0.05){
-    c.onGround = false;
-  }
-  // ceiling
-  if(c.pos.y > ARENA.ceil-3){ c.pos.y = ARENA.ceil-3; c.vel.y = Math.min(0,c.vel.y); }
+  } else {
+    // ---- floor / air ----
+    if(c.pos.y <= 0){
+      if(c.vel.y < -14){
+        thump(Math.min(1, -c.vel.y/30));
+        const n = 12 + Math.min(20, (-c.vel.y/3)|0);   // dust ring spreads outward, bigger on harder landings
+        for(let k=0;k<n;k++){ const a=Math.random()*Math.PI*2, r=1+Math.random()*3.5;
+          spawnPart(c.pos.x+Math.cos(a)*r, 0.3, c.pos.z+Math.sin(a)*r,
+            Math.cos(a)*(4+Math.random()*7), 1+Math.random()*3, Math.sin(a)*(4+Math.random()*7),
+            Math.random()<0.7?0x9a7a52:0x6a4a28, 0.5+Math.random()*0.35, 0.7+Math.random()*0.6); }
+      }
+      c.pos.y = 0; c.vel.y = 0; c.up.set(0,1,0);
+      if(!c.onGround){ c.onGround = true; c.jumps = 2; c.flip = 0; }
+    } else if (c.pos.y > 0.05){
+      c.onGround = false;
+    }
+    // ceiling
+    if(c.pos.y > ARENA.ceil-3){ c.pos.y = ARENA.ceil-3; c.vel.y = Math.min(0,c.vel.y); }
 
-  // walls (allow goal openings)
-  const inGoalMouthZ = Math.abs(c.pos.z) < ARENA.goalHalfW - 1;
-  const maxX = inGoalMouthZ ? ARENA.halfX + ARENA.goalDepth - 2 : ARENA.halfX - 2;
-  if(c.pos.x >  maxX){ c.pos.x =  maxX; c.vel.x = Math.min(0, c.vel.x)* -0.3; }
-  if(c.pos.x < -maxX){ c.pos.x = -maxX; c.vel.x = Math.max(0, c.vel.x)* -0.3; }
-  const insideGoalX = Math.abs(c.pos.x) > ARENA.halfX - 1;
-  const maxZ = insideGoalX ? ARENA.goalHalfW - 1.2 : ARENA.halfZ - 2;
-  if(c.pos.z >  maxZ){ c.pos.z =  maxZ; c.vel.z *= -0.3; }
-  if(c.pos.z < -maxZ){ c.pos.z = -maxZ; c.vel.z *= -0.3; }
+    // grab a wall: grounded, aimed into it fast enough, not at a goal mouth
+    if(c.onGround && c.wallAxis === null){
+      if(Math.abs(c.pos.z) > ARENA.goalHalfW + 2){
+        if(ARENA.halfX - c.pos.x < WALL_R && c.vel.x >  WALL_CLIMB_MIN){ c.wallAxis=0; c.wallSign= 1; }
+        else if(ARENA.halfX + c.pos.x < WALL_R && c.vel.x < -WALL_CLIMB_MIN){ c.wallAxis=0; c.wallSign=-1; }
+      }
+      if(c.wallAxis === null){
+        if(ARENA.halfZ - c.pos.z < WALL_R && c.vel.z >  WALL_CLIMB_MIN){ c.wallAxis=1; c.wallSign= 1; }
+        else if(ARENA.halfZ + c.pos.z < WALL_R && c.vel.z < -WALL_CLIMB_MIN){ c.wallAxis=1; c.wallSign=-1; }
+      }
+      if(c.wallAxis !== null){ stickToWall(c); }
+    }
+
+    // hard walls for cars that AREN'T climbing (slow bumps still stop, as before)
+    if(c.wallAxis === null){
+      const inGoalMouthZ = Math.abs(c.pos.z) < ARENA.goalHalfW - 1;
+      const maxX = inGoalMouthZ ? ARENA.halfX + ARENA.goalDepth - 2 : ARENA.halfX - 2;
+      if(c.pos.x >  maxX){ c.pos.x =  maxX; c.vel.x = Math.min(0, c.vel.x)* -0.3; }
+      if(c.pos.x < -maxX){ c.pos.x = -maxX; c.vel.x = Math.max(0, c.vel.x)* -0.3; }
+      const insideGoalX = Math.abs(c.pos.x) > ARENA.halfX - 1;
+      const maxZ = insideGoalX ? ARENA.goalHalfW - 1.2 : ARENA.halfZ - 2;
+      if(c.pos.z >  maxZ){ c.pos.z =  maxZ; c.vel.z *= -0.3; }
+      if(c.pos.z < -maxZ){ c.pos.z = -maxZ; c.vel.z *= -0.3; }
+    }
+  }
 
   // boost pads
   for(const p of pads){
@@ -8118,14 +8294,19 @@ function updateCar(c, dt, input){
 
   // visual
   c.mesh.position.copy(c.pos);
-  // Blade Spin whirls the whole rig; otherwise face travel direction
-  if(c.spinT > 0){ c.mesh.rotation.set(0, c.yaw + (0.6 - c.spinT)/0.6 * Math.PI*4, 0); }
-  else c.mesh.rotation.set(0, c.yaw, 0);
-  // body roll into corners, scaled by speed — reads like soft turf tires loading up
-  const rollT = c.onGround ? c.steerVis * Math.min(1, Math.hypot(c.vel.x,c.vel.z)/40) * 0.07 : 0;
-  c.rollVis += (rollT - c.rollVis) * Math.min(1, 10*dt);
-  if(c.rollVis) c.mesh.rotateZ(c.rollVis);
-  if(c.flip>0){
+  // On a wall, lie the body against the surface. Flat floor keeps the old path.
+  if(c.wallAxis !== null && c.spinT <= 0 && orientCarMesh(c)){
+    // oriented by quaternion; skip the euler roll/flip niceties while wall-riding
+  } else {
+    // Blade Spin whirls the whole rig; otherwise face travel direction
+    if(c.spinT > 0){ c.mesh.rotation.set(0, c.yaw + (0.6 - c.spinT)/0.6 * Math.PI*4, 0); }
+    else c.mesh.rotation.set(0, c.yaw, 0);
+    // body roll into corners, scaled by speed — reads like soft turf tires loading up
+    const rollT = c.onGround ? c.steerVis * Math.min(1, Math.hypot(c.vel.x,c.vel.z)/40) * 0.07 : 0;
+    c.rollVis += (rollT - c.rollVis) * Math.min(1, 10*dt);
+    if(c.rollVis) c.mesh.rotateZ(c.rollVis);
+  }
+  if(c.wallAxis === null && c.flip>0){
     const t = 1 - c.flip/0.55;
     c.mesh.rotateX(c.flipDir * t * Math.PI*2);
   } else if(!c.onGround){
@@ -9161,7 +9342,8 @@ NET.applySnapshots = function(dt, pin, canDrive){
       if(!sa[8] && c.dead > 0) c.dead = 0;
       c.mesh.visible = !sa[8];
       c.mesh.position.copy(c.pos);
-      c.mesh.rotation.set(0, c.yaw, 0);
+      deriveUp(c);                               // recover wall pose from position (no extra bytes)
+      if(!(c.wallAxis !== null && orientCarMesh(c))) c.mesh.rotation.set(0, c.yaw, 0);
       if(c.tag){ c.tag.position.set(c.pos.x, c.pos.y + 5.2, c.pos.z); c.tag.visible = !sa[8]; }
     }
   }

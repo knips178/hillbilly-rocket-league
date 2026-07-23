@@ -108,8 +108,8 @@ Object.defineProperty(global, 'navigator', { value: { getGamepads: ()=>[fakePad]
 // ---- load game ----
 const fs=require('fs');
 const src=fs.readFileSync('/tmp/game.js','utf8');
-eval(src + '\n;global.__G={startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,NET,updateCar,botInput,presentGoal,togglePause};');
-const {startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,NET,updateCar,botInput,presentGoal,togglePause} = global.__G;
+eval(src + '\n;global.__G={startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,ARENA,WALL_R,BOOST_DRAIN};');
+const {startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,ARENA,WALL_R,BOOST_DRAIN} = global.__G;
 
 // ---- simulate ----
 function frame(){ const fn=rafQueue.shift(); if(fn) fn(); while(pendingTimeouts.length) pendingTimeouts.shift()(); }
@@ -330,5 +330,46 @@ togglePause();
 NET.role = 'solo'; NET.slots = []; NET.roster = null; NET.inputs = {};
 console.log('multiplayer seat table OK — bot-fill spawns a full grid');
 console.log('netcode OK — roster order, remote input, drop-to-bot, goal replication');
+
+// ---- curved walls: cars drive up 'em ----
+NET.role = 'solo';
+game.state = 'lobby'; startMatch(false);
+for(let i=0;i<60*20 && game.state!=='play';i++) frame();
+const wc = game.player;
+
+// flat driving in open space must be byte-identical: up stays +Y, y stays 0
+wc.pos.set(0,0,0); wc.vel.set(0,0,0); wc.wallAxis=null; wc.up.set(0,1,0); wc.yaw=Math.PI/2; // face +X
+for(let i=0;i<30;i++) updateCar(wc, 1/60, {throttle:1,steer:0,boost:false});
+if(wc.wallAxis) throw new Error('car grabbed a wall out in the open');
+if(Math.abs(wc.pos.y) > 0.001) throw new Error('flat driving lifted off the floor: y='+wc.pos.y);
+
+// aimed into the +X wall at speed, it should climb: y rises and up tilts off +Y
+wc.pos.set(ARENA.halfX - WALL_R + 1, 0, 30); wc.vel.set(60,0,0); wc.yaw=Math.PI/2; wc.wallAxis=null; wc.up.set(0,1,0);
+for(let i=0;i<40;i++) updateCar(wc, 1/60, {throttle:1,steer:0,boost:true});
+if(wc.wallAxis !== 0) throw new Error('car did not grab the +X wall');
+if(wc.pos.y < 3) throw new Error('car did not climb the wall: y='+wc.pos.y.toFixed(1));
+if(wc.up.y > 0.98) throw new Error('body did not tilt onto the wall: up.y='+wc.up.y.toFixed(2));
+if(wc.pos.x > ARENA.halfX + 0.5) throw new Error('car punched through the wall: x='+wc.pos.x.toFixed(1));
+
+// let go of everything and it slides/falls back down to the floor
+for(let i=0;i<60*4;i++) updateCar(wc, 1/60, {throttle:0,steer:0,boost:false});
+if(wc.wallAxis) throw new Error('car never came off the wall');
+if(Math.abs(wc.up.y-1) > 0.01) throw new Error('up did not reset to +Y after returning to floor');
+if(Math.abs(wc.pos.y) > 0.1) throw new Error('car did not settle back on the floor');
+
+// jumping off a wall launches away from it (−X-ish) and detaches
+wc.pos.set(ARENA.halfX, 8, 30); wc.vel.set(0,10,0); wc.wallAxis=0; wc.wallSign=1; wc.onGround=true;
+stickToWall(wc); tryJump(wc);
+if(wc.wallAxis) throw new Error('jump did not detach from the wall');
+if(wc.vel.x > -1) throw new Error('jump did not push off the wall (vx='+wc.vel.x.toFixed(1)+')');
+
+// no grabbing the wall across a goal mouth (would fly into the net)
+wc.pos.set(ARENA.halfX - 2, 0, 0); wc.vel.set(70,0,0); wc.wallAxis=null; wc.up.set(0,1,0); wc.yaw=Math.PI/2;
+for(let i=0;i<20;i++) updateCar(wc, 1/60, {throttle:1,steer:0,boost:true});
+if(wc.wallAxis===0 && Math.abs(wc.pos.z) < ARENA.goalHalfW) throw new Error('car climbed the goal-mouth opening');
+
+// boost lasts longer now
+if(BOOST_DRAIN >= 28) throw new Error('boost drain was not reduced');
+console.log('curved walls OK — climb, descend, jump-off, goal-mouth guard; boost drain '+BOOST_DRAIN);
 
 console.log('ALL TESTS PASSED');

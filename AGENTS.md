@@ -72,6 +72,32 @@ Two traps that cost real debugging time, both now fixed -- don't reintroduce:
    `relay` candidate actually comes back) and keep the waitin' room CONNECTION INFO readout
    (`remoteSDP > 0` = the devices found each other, so any failure is the peer link, not matchmaking).
 
+## Curved walls / wall-riding (keep this working)
+
+Cars drive up the walls RL-style. Each wall meets the floor through a quarter-circle fillet of
+radius `WALL_R` (16). A car carries a surface normal `c.up`; `carForward` is generalised so steering
+and throttle work in any surface's tangent plane, and on the floor it returns the **exact** old flat
+forward (so flat driving is byte-identical — protect that).
+
+- Grab a wall: grounded, aimed into it above `WALL_CLIMB_MIN` (26), not across a goal mouth. Sets
+  `c.wallAxis` (0=x, 1=z) + `c.wallSign`. **`wallAxis` is 0 for X-walls, which is FALSY — always test
+  `!== null` / `=== null`, never truthiness. That bug cost a debugging cycle.**
+- `stickToWall` projects the car onto the NEAREST point of the {floor→fillet→wall} cross-section
+  (`projectWall`) and scrubs velocity into the surface. Nearest-point projection is what converts
+  inward momentum into a climb — pinning the axis coord from height does NOT climb.
+- `projectWall`'s vertical-wall test keys on **height** (`y >= WALL_R`), not on `p >= half`, or a
+  descending car sticks at the fillet top instead of curving back down.
+- Detach: rolling back past the fillet (`p <= half - WALL_R`) or a goal opening → floor; jump → launch
+  along `c.up`.
+- Multiplayer: snapshots still carry only pos/yaw/vel. Clients call `deriveUp(c)` to recover the wall
+  pose from position — no extra bytes.
+- Visual ramp meshes (`wallRamps`) are built from the SAME arc as the physics; verified their vertex
+  bounds coincide with the fillet (x∈[halfX-R, halfX], y∈[0, WALL_R]). Guarded behind
+  `THREE.BufferGeometry` so the headless harness skips them. `WALL_R`/`WALL_CLIMB_MIN`/`UP_Y` are
+  declared up with the arena constants because the ramp meshes are built earlier in the file than the
+  physics (const TDZ bit once).
+- Boost lasts a touch longer: `BOOST_DRAIN` 28 → 22.
+
 ## Multiplayer invariants (keep these working)
 
 - **Solo must never regress.** `NET.role` defaults to `'solo'`, nothing initialises at load, and the
