@@ -22,7 +22,18 @@ const els = {};
 global.document = {
   createElement: t=>makeEl(t),
   getElementById: id=> (els[id] ||= makeEl('div')),
-  querySelectorAll: ()=>[],
+  // Returning [] for everything made menu rows collapse in the harness but not
+  // in a browser, so nav tests only passed by accident. Give the selectors the
+  // lobby actually uses a realistic element count.
+  querySelectorAll: sel=>{
+    const counts = {
+      '#vehicle-list .vcard': 5, '#vehicle-list-join .vcard': 5,
+      '#size-row .pick-btn': 3, '#len-row .pick-btn': 3, '#arena-row .pick-btn': 4,
+      '#overlay-screen .ov-btn': 3, '#waitroom .btn-row .pick-btn': 2,
+    };
+    const n = counts[sel] || 0;
+    return Array.from({length:n}, ()=>makeEl('button'));
+  },
   body: makeEl('body'),
   get activeElement(){ return null; },
 };
@@ -105,9 +116,12 @@ function frame(){ const fn=rafQueue.shift(); if(fn) fn(); while(pendingTimeouts.
 function runFrames(n){ for(let f=0; f<n && game.state!=='end'; f++) frame(); }
 function press(i){ fakePad.buttons[i].pressed=true; frame(); fakePad.buttons[i].pressed=false; frame(); }
 
-// controller menu-nav test (in lobby) — 7 rows now
-// (team, ride, size, length, arena, multiplayer, start) — 6 downs to reach START
-press(13); press(13); press(13); press(13); press(13); press(13);
+// controller menu-nav test — the lobby is staged now.
+// Stage 1 (home): PLAY SOLO / HOST / JOIN. Activating PLAY SOLO opens stage 2.
+// Stage 2 (setup, solo): team, ride, size, length, arena, GIT 'ER DONE, BACK
+// — so 5 downs reach the start button.
+press(0);
+press(13); press(13); press(13); press(13); press(13);
 press(0);
 console.log('controller menu start test — state:', game.state, '(expect countdown)');
 if(game.state!=='countdown') throw new Error('controller menu start failed');
