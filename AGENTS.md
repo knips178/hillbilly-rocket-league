@@ -171,6 +171,13 @@ Harness pins it: the car must be <35 deg off the view axis at the wall base, up 
 corner and inside the goal, in BOTH camera modes. `setBallCam()` exists so tests can switch mode
 (the game's `let ballCam` isn't assignable from the harness).
 
+`rebaseYawToFloor` converts wall-frame yaw to floor yaw when a car detaches. It reads the car's
+horizontal **velocity**, not its facing: right as `up` returns to +Y the surface frame is degenerate
+and `carForward` jumps to an arbitrary tangent, so reading facing there snapped a straight-down
+descent 90° sideways on landing (reported bug). Velocity coming down a wall points down AND into the
+pitch, so its horizontal part is the right floor heading; falls back to facing, then to the surface
+normal's horizontal (into the pitch) for a dead-slow peel-off.
+
 `resetKickoff` must also clear `wallAxis` / `up` / `pitch` / `flipT` — scoring while wall-riding used
 to leave the car sat sideways on the kickoff line with `yaw` read in the WALL frame.
 

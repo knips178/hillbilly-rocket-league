@@ -371,6 +371,25 @@ if(wc.wallAxis) throw new Error('car never came off the wall');
 if(Math.abs(wc.up.y-1) > 0.01) throw new Error('up did not reset to +Y after returning to floor');
 if(Math.abs(wc.pos.y) > 0.1) throw new Error('car did not settle back on the floor');
 
+// REPORTED: driving straight DOWN a wall snapped the car 90° on landing.
+// After the descent it must be level and heading into the pitch (away from the
+// wall), not sideways along it.
+for(const [ax, sg] of [[0,1],[0,-1],[1,1],[1,-1]]){
+  const half = ax===0 ? ARENA.halfX : ARENA.halfZ;
+  wc.wallAxis=ax; wc.wallSign=sg; wc.pos.set(ax===0?sg*half:10, ARENA.wallH*0.5, ax===0?25:sg*half);
+  wc.vel.set(0,0,0); wc.pitch=0; stickToWall(wc);
+  wc.yaw = -Math.PI/2;                       // face straight DOWN the wall
+  for(let i=0;i<60*8 && wc.wallAxis!==null;i++) updateCar(wc, 1/60, {throttle:1,steer:0,boost:false});
+  if(wc.wallAxis !== null) throw new Error('descent '+ax+'/'+sg+': never reached the floor');
+  const f = carForward(wc);
+  if(Math.abs(f.y) > 0.05) throw new Error('descent '+ax+'/'+sg+': landed not level (fy='+f.y.toFixed(2)+')');
+  // heading should point INTO the pitch = the wall normal's horizontal, not across it
+  const inx = -sg*(ax===0?1:0), inz = -sg*(ax===1?1:0);   // inward direction
+  const along = f.x*inx + f.z*inz;
+  if(along < 0.6) throw new Error('descent '+ax+'/'+sg+': snapped sideways on landing (into-pitch dot='+along.toFixed(2)+')');
+}
+wc.wallAxis=null; wc.up.set(0,1,0); wc.pitch=0; wc.pos.set(0,0,0);
+
 // jumping off a wall launches away from it (−X-ish) and detaches
 wc.pos.set(ARENA.halfX, 8, 30); wc.vel.set(0,10,0); wc.wallAxis=0; wc.wallSign=1; wc.onGround=true;
 stickToWall(wc); tryJump(wc);

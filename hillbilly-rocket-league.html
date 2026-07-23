@@ -7474,8 +7474,20 @@ function rebaseYawToWall(c){
   c.yaw = Math.atan2(fx*F.cx + fz*F.cz, fx*F.lx + fz*F.lz);
 }
 function rebaseYawToFloor(c){
-  const f = carForward(c);
-  if(Math.abs(f.x) > 1e-5 || Math.abs(f.z) > 1e-5) c.yaw = Math.atan2(f.x, f.z);
+  // The reported bug: driving straight down a wall snapped the car 90° on landing.
+  // Reading the FACING at that moment is unreliable — right as `up` returns to +Y the
+  // surface frame is degenerate and carForward jumps to an arbitrary tangent. The car's
+  // horizontal VELOCITY is the honest signal: coming down a wall ya move down AND into
+  // the pitch, so its horizontal part is exactly the heading ya want on the floor.
+  let hx = c.vel.x, hz = c.vel.z;
+  if(Math.hypot(hx, hz) < 0.5){                       // barely moving — fall back to facing
+    const f = carForward(c); hx = f.x; hz = f.z;
+  }
+  if(Math.hypot(hx, hz) < 0.25 && c.up){              // facing up/down the wall — head into the pitch
+    const nlen = Math.hypot(c.up.x, c.up.z);
+    if(nlen > 1e-4){ hx = c.up.x / nlen; hz = c.up.z / nlen; }
+  }
+  if(Math.abs(hx) > 1e-5 || Math.abs(hz) > 1e-5) c.yaw = Math.atan2(hx, hz);
 }
 
 // Nearest point of the {floor → fillet → wall} cross-section for a car whose
