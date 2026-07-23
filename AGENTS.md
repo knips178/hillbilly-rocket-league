@@ -170,6 +170,13 @@ car rounds onto the roof instead of hitting a hard corner, then hands over to `w
 it's past the curve. Verified the profile is continuous: normal runs (-0.71,0.71) at the floor →
 (-1,0) up the wall → (-0.89,-0.45) over the top → the ceiling.
 
+**The shell must be checked in ALL FOUR venues, not just the barn.** It is one set of meshes shared
+by every arena, tinted per venue via `ramp` / `glass` / `rail` / `post` in `ARENA_LOOKS`.
+Indoor (barn, pond) vs open-air (bog, marsh) is a real split: `wallUpper` — the full-height posts,
+the roof trim beams and the see-through roof — is gated on `L.shell`. First pass put tall posts in
+every venue and in the open-air bog they rose 28 units into the SKY like scaffolding. Short stubs
+brace the boards everywhere; only indoor venues get the tall structure and a roof.
+
 **Anything that changes the shell must change both** — the mesh and `projectWall` — or you get
 invisible walls again. Generate from one profile, never hand-place them.
 

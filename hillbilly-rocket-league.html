@@ -6126,10 +6126,10 @@ function updateDucks(dt){
 
 // venue looks: fog + light tint + floor surface + weather + which scenery/boards/goal dressing stands
 const ARENA_LOOKS = [
-  { fog:0x46283c, near:200, far:460, sky:0xbb7a99, ground:0x2a1d0d, sunC:0xffb070, sunI:1.15, map:()=>fieldTex, weather:'off',       shell:true,  bog:false, marsh:false, boards:'barn',  outer:0x4a3a20, amb:'none',     ramp:0x7d5a30, glass:0xd8c9a4, rail:0xd8a53a },
-  { fog:0x2c3c50, near:170, far:430, sky:0x9fc4e8, ground:0x24303c, sunC:0xcfe4ff, sunI:1.0,  map:()=>iceTex,   weather:'snow',      shell:true,  bog:false, marsh:false, boards:'barn',  outer:0x4a4438, amb:'wind',     ramp:0x6f7684, glass:0xcfe4f2, rail:0x9fd0e8 },
-  { fog:0x25301e, near:150, far:430, sky:0x7a9a6a, ground:0x1a1608, sunC:0xd8e89a, sunI:0.85, map:()=>bogTex,   weather:'fireflies', shell:false, bog:true,  marsh:false, boards:'bog',   outer:0x2c2c1a, amb:'crickets', ramp:0x4d4a2a, glass:0xb8c49a, rail:0x9aa845 },
-  { fog:0x8a94a0, near:180, far:470, sky:0xc8d4e0, ground:0x3a4434, sunC:0xffd9a0, sunI:1.05, map:()=>marshTex, weather:'off',       shell:false, bog:false, marsh:true,  boards:'marsh', outer:0x3a5548, amb:'crickets', ramp:0x5c6b52, glass:0xc4d6cc, rail:0xc2a35a },
+  { fog:0x46283c, near:200, far:460, sky:0xbb7a99, ground:0x2a1d0d, sunC:0xffb070, sunI:1.15, map:()=>fieldTex, weather:'off',       shell:true,  bog:false, marsh:false, boards:'barn',  outer:0x4a3a20, amb:'none',     ramp:0x7d5a30, glass:0xd8c9a4, rail:0xd8a53a, post:0x5a4322 },
+  { fog:0x2c3c50, near:170, far:430, sky:0x9fc4e8, ground:0x24303c, sunC:0xcfe4ff, sunI:1.0,  map:()=>iceTex,   weather:'snow',      shell:true,  bog:false, marsh:false, boards:'barn',  outer:0x4a4438, amb:'wind',     ramp:0x6f7684, glass:0xcfe4f2, rail:0x9fd0e8, post:0x4a5560 },
+  { fog:0x25301e, near:150, far:430, sky:0x7a9a6a, ground:0x1a1608, sunC:0xd8e89a, sunI:0.85, map:()=>bogTex,   weather:'fireflies', shell:false, bog:true,  marsh:false, boards:'bog',   outer:0x2c2c1a, amb:'crickets', ramp:0x4d4a2a, glass:0xb8c49a, rail:0x9aa845, post:0x33301c },
+  { fog:0x8a94a0, near:180, far:470, sky:0xc8d4e0, ground:0x3a4434, sunC:0xffd9a0, sunI:1.05, map:()=>marshTex, weather:'off',       shell:false, bog:false, marsh:true,  boards:'marsh', outer:0x3a5548, amb:'crickets', ramp:0x5c6b52, glass:0xc4d6cc, rail:0xc2a35a, post:0x44503c },
 ];
 function applyArena(i){
   const L = ARENA_LOOKS[i] || ARENA_LOOKS[0];
@@ -6141,6 +6141,7 @@ function applyArena(i){
   if(sun.color && sun.color.setHex){ sun.color.setHex(L.sunC); sun.intensity = L.sunI; }
   if(floor.material){ floor.material.map = L.map(); floor.material.needsUpdate = true; }
   barnShell.visible = L.shell;
+  wallUpper.visible = L.shell;   // tall posts + roof trim: indoor venues only
   bogScenery.visible = L.bog;
   marshScenery.visible = L.marsh;
   // themed boards + crowd perches + goal dressing (same spots, different wood)
@@ -6154,6 +6155,7 @@ function applyArena(i){
   if(wallRampMat && wallRampMat.color && wallRampMat.color.setHex) wallRampMat.color.setHex(L.ramp || L.ground || 0x6a5a3a);
   if(glassMat && glassMat.color && glassMat.color.setHex) glassMat.color.setHex(L.glass || 0xbfd6d0);
   if(railMat && railMat.color && railMat.color.setHex) railMat.color.setHex(L.rail || 0xd8a53a);
+  if(postMat && postMat.color && postMat.color.setHex) postMat.color.setHex(L.post || 0x5a4322);
   setAmbience(L.amb || 'none');
   setWeather(L.weather);
 }
@@ -6182,9 +6184,10 @@ scene.add(barnShell);
 const wallRamps  = new THREE.Group();   // kick-plates (opaque, textured)
 const arenaGlass = new THREE.Group();   // boards + roof (see-through)
 const wallRail   = new THREE.Group();   // painted rail + top trim + posts
+const wallUpper  = new THREE.Group();   // tall posts + roof trim — INDOOR venues only
 const wallShade  = new THREE.Group();   // contact shadow seating the curve into the pitch
 let wallRampMat = null, glassMat = null, railMat = null, postMat = null;
-scene.add(wallRamps); scene.add(arenaGlass); scene.add(wallRail); scene.add(wallShade);
+scene.add(wallRamps); scene.add(arenaGlass); scene.add(wallRail); scene.add(wallUpper); scene.add(wallShade);
 
 // Weathered board texture: vertical planks, grain, nail heads, and the scuffs a
 // few thousand mower bumpers leave along the bottom.
@@ -6275,15 +6278,22 @@ if(typeof THREE.BufferGeometry === 'function' && typeof THREE.Float32BufferAttri
   };
 
   // timber posts every so often, tucked just outside the glass
+  // Short stubs brace the boards everywhere. FULL-height posts only go up indoors —
+  // out in the bog and marsh there's no roof, so tall poles just read as scaffolding
+  // stuck in the sky (they did exactly that before this split).
   const addPosts = (axis, sign, aA, aB)=>{
     // spacing chosen to keep the rhythm without spraying draw calls (see AGENTS.md perf note)
     const span = Math.abs(aB - aA), n = Math.max(2, Math.round(span / uu(1150)));
+    const perp = (axis===0 ? ARENA.halfX : ARENA.halfZ) + uu(14);
     for(let i=0;i<=n;i++){
       const along = aA + (aB-aA) * (i/n);
-      const post = new THREE.Mesh(new THREE.BoxGeometry(uu(34), topC - R*0.9, uu(34)), postMat);
-      const perp = (axis===0 ? ARENA.halfX : ARENA.halfZ) + uu(14);
-      post.position.set(axis===0 ? sign*perp : along, (topC + R*0.9)/2, axis===0 ? along : sign*perp);
-      wallRail.add(post);
+      const stubH = R*2.1;
+      const stub = new THREE.Mesh(new THREE.BoxGeometry(uu(38), stubH, uu(38)), postMat);
+      stub.position.set(axis===0 ? sign*perp : along, stubH/2, axis===0 ? along : sign*perp);
+      wallRail.add(stub);
+      const tall = new THREE.Mesh(new THREE.BoxGeometry(uu(30), topC - stubH, uu(30)), postMat);
+      tall.position.set(axis===0 ? sign*perp : along, (topC + stubH)/2, axis===0 ? along : sign*perp);
+      wallUpper.add(tall);
     }
   };
 
@@ -6317,16 +6327,16 @@ if(typeof THREE.BufferGeometry === 'function' && typeof THREE.Float32BufferAttri
   // trim beam capping the top curve where it turns into the roof
   for(const sgn of [1,-1]){
     const bx = new THREE.Mesh(new THREE.BoxGeometry(uu(34), uu(34), (ARENA.halfZ-R)*2), postMat);
-    bx.position.set(sgn*(ARENA.halfX - R), CH - uu(20), 0); wallRail.add(bx);
+    bx.position.set(sgn*(ARENA.halfX - R), CH - uu(20), 0); wallUpper.add(bx);
     const bz = new THREE.Mesh(new THREE.BoxGeometry((ARENA.halfX-R)*2, uu(34), uu(34)), postMat);
-    bz.position.set(0, CH - uu(20), sgn*(ARENA.halfZ - R)); wallRail.add(bz);
+    bz.position.set(0, CH - uu(20), sgn*(ARENA.halfZ - R)); wallUpper.add(bz);
   }
 
   // the roof ya can actually drive on, inset by the top curve
   const roof = new THREE.Mesh(
     new THREE.PlaneGeometry((ARENA.halfX - WALL_R)*2, (ARENA.halfZ - WALL_R)*2), glassMat);
   roof.rotation.x = Math.PI/2; roof.position.y = ARENA.ceil;
-  arenaGlass.add(roof);
+  wallUpper.add(roof);
 }
 
 const plankMat = new THREE.MeshLambertMaterial({ map: barnPlankTex, side:THREE.DoubleSide });
