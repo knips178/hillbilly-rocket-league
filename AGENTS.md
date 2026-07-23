@@ -91,6 +91,14 @@ forward (so flat driving is byte-identical — protect that).
   along `c.up`.
 - Multiplayer: snapshots still carry only pos/yaw/vel. Clients call `deriveUp(c)` to recover the wall
   pose from position — no extra bytes.
+- **Tuned to real RL after "feels weird" feedback:** corner radius is RL-proportional — real RL
+  corners are ~256uu on a 4096 half-arena (~6%), so `WALL_R` is 8 (was 16 ≈ 20%, a giant quarter-pipe
+  you curved up from too far out). And the CAMERA: RL never rolls the camera with the car (world-up is
+  kept); the readable-ness comes from WHERE it sits. `updateCamera` has a wall branch that puts the
+  camera OFF the wall (along `c.up`) and BEHIND the car along the surface, looking up the wall at it —
+  not pinned above near the ceiling. `camera.up` is never touched. Verified visually: the wall reads as
+  the "floor" of the frame, car climbs away from the chase cam, no roll. Speedo uses 3D speed so climbs
+  register.
 - Visual ramp meshes (`wallRamps`) are built from the SAME arc as the physics; verified their vertex
   bounds coincide with the fillet (x∈[halfX-R, halfX], y∈[0, WALL_R]). Guarded behind
   `THREE.BufferGeometry` so the headless harness skips them. `WALL_R`/`WALL_CLIMB_MIN`/`UP_Y` are

@@ -5018,8 +5018,10 @@ let BALL_R = 4.4;                       // live radius — Maw's "HAWG BALL" wil
 const GRAV_CAR = -34, GRAV_BALL = -24;
 const BOOST_DRAIN = 22;   // was 28 — turbo lasts a little longer now (full tank ~4.5s vs ~3.6s)
 // Curved wall-base fillets: cars grab a wall and ride up it (see updateCar).
-const WALL_R = 16;            // fillet radius where wall meets floor
-const WALL_CLIMB_MIN = 26;    // speed you need, aimed into a wall, to grab it
+// Radius is RL-proportional: real RL corners are ~256uu against a 4096 half-arena
+// (~6%). 16 was ~20% — a giant quarter-pipe you curved up from way too far out.
+const WALL_R = 8;             // fillet radius where wall meets floor
+const WALL_CLIMB_MIN = 24;    // speed you need, aimed into a wall, to grab it
 const UP_Y = { x:0, y:1, z:0 };
 const CAR_COLL_R = 3.0;
 const SUPERSONIC = 46;
@@ -9730,6 +9732,37 @@ const camLook = new THREE.Vector3(0,0,0);
 function updateCamera(dt){
   const p = game.player; if(!p) return;
   let want, lookTarget;
+
+  // ---- wall-riding camera ----
+  // RL rule (verified): the camera does NOT roll with the car — it stays world-up.
+  // The trick that makes it readable is WHERE it sits: off the wall and behind the
+  // car along the surface, looking up the wall at it, rather than pinned above it
+  // near the ceiling. camera.up is never touched, so there's no nauseating roll.
+  if(p.wallAxis !== null){
+    const n = p.up;                                   // surface normal, pointing into the pitch
+    const fwd = carForward(p);                        // up / along the wall
+    want = p.pos.clone()
+      .addScaledVector(fwd, -CAM_DIST*0.65)           // drop behind the car along the wall
+      .addScaledVector(n, CAM_HEIGHT + 5);            // and pull off the wall into the arena
+    // don't let it sink through the floor or punch the ceiling
+    want.y = THREE.MathUtils.clamp(want.y, 2.5, ARENA.ceil - 3);
+    want.x = THREE.MathUtils.clamp(want.x, -(ARENA.halfX-2.5), ARENA.halfX-2.5);
+    want.z = THREE.MathUtils.clamp(want.z, -(ARENA.halfZ-2.5), ARENA.halfZ-2.5);
+    lookTarget = ballCam ? ball.pos.clone() : p.pos.clone();
+    lookTarget.lerp(p.pos, 0.5);                      // keep the car firmly in frame
+    camPos.lerp(want, 1 - Math.exp(-9 * dt));
+    camera.position.copy(camPos);
+    camLook.lerp(lookTarget, 1 - Math.exp(-11 * dt));
+    camera.lookAt(camLook);
+    const pspd2 = Math.hypot(p.vel.x, p.vel.y, p.vel.z);
+    const fovW = 80 + THREE.MathUtils.clamp((pspd2 - 38) / 28, 0, 1) * 9;
+    if(Math.abs(camera.fov - fovW) > 0.02){ camera.fov += (fovW - camera.fov)*Math.min(1,6*dt); camera.updateProjectionMatrix(); }
+    updateXray(p.pos, dt);
+    if(camShake > 0){ camera.position.x += (Math.random()-0.5)*camShake*2.2; camera.position.y += (Math.random()-0.5)*camShake*2.2;
+      camShake = Math.max(0, camShake - dt*1.6); }
+    return;
+  }
+
   if(ballCam){
     // car stays between camera and ball; look at the ball
     const dir = p.pos.clone().sub(ball.pos); dir.y = 0;
@@ -9977,7 +10010,7 @@ function animate(){
     const bo = Math.round(p.boost);
     HUD.boostNum.textContent = bo;
     HUD.boostRing.style.setProperty('--b', (bo*3.6)+'deg');
-    const pSpeed = Math.hypot(p.vel.x,p.vel.z);
+    const pSpeed = Math.hypot(p.vel.x, p.vel.y, p.vel.z);   // 3D so wall climbs read on the speedo
     const mph = Math.round(pSpeed * 2.1);
     HUD.speedo.textContent = mph + ' mph' + (p.shineT>0 ? '  ☀️ SHINE' : (pSpeed>SUPERSONIC ? '  🔥 SUPERSONIC' : ''));
     updateEngine(pSpeed, pin.boost);
