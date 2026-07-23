@@ -10049,7 +10049,7 @@ document.getElementById('wr-copy').onclick = ()=>{
 // ---------------- CAMERA (tuned to real Rocket League specs, scaled) ----------------
 // RL defaults: distance 270uu, height 110uu, angle -3°, stiffness ~0.45, smoothed swivel.
 // Our car ≈ 7 units vs RL 118uu → scale ≈ 0.06: distance ≈ 16-21, height ≈ 6.6-8.
-const CAM_DIST = uu(270), CAM_HEIGHT = uu(100);   // RL boom + height
+const CAM_DIST = uu(300), CAM_HEIGHT = uu(200);   // RL boom + height, lifted for visibility
 // RL "stiffness": the boom lengthens as ya speed up so the camera falls behind —
 // the spec calls this the primary speed feedback. ~25% longer flat out.
 const CAM_ZOOM = uu(70);
@@ -10170,7 +10170,12 @@ function updateCamera(dt){
       if(ang > LIMIT) camLook.lerp(p.pos, Math.min(1, (ang - LIMIT)/ang + 0.08));
     }
   }
-  const lk = camLook.clone(); lk.y += 1.2; // slight downward angle (~RL -3°)
+  // RL's downward camera angle (~-4°), computed from the actual boom geometry so it
+  // holds at any scale. The old code raised the aim by a fixed 1.2 world units, which
+  // at RL scale tilted the view UP into the rafters — that's why ya couldn't see ahead.
+  const lk = camLook.clone();
+  const horiz = Math.hypot(lk.x - camera.position.x, lk.z - camera.position.z);
+  lk.y -= horiz * 0.075;                    // tan(~4.3°)
   camera.lookAt(lk);
   // speed widens the lens (RL-style FOV kick): 80° cruising, up to ~89° flat-out with boost
   const pspd = Math.hypot(p.vel.x, p.vel.z);
