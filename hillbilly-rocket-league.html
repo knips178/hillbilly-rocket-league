@@ -788,7 +788,7 @@ STILL TO DO (ideas for future iterations):
     <div class="section" style="font-size:12px">What's yer name, hoss?</div>
     <input id="wr-name" maxlength="16" placeholder="Billy Bob" style="width:100%;max-width:320px;padding:9px;border-radius:7px;border:2px solid #5a3f22;background:rgba(0,0,0,.4);color:#f2e2c4;font-size:16px;text-align:center">
 
-    <div class="section">Room code — tell yer people</div>
+    <div class="section" id="wr-code-label">Room code — tell yer people</div>
     <div class="code-box" id="wr-code">----</div>
     <div class="btn-row" style="margin-top:10px">
       <button class="pick-btn" id="wr-copy">📋 COPY INVITE LINK</button>
@@ -8573,7 +8573,18 @@ function endMatch(){
   setTimeout(()=>playVox(eb), 700);
   if(won){ banjoLick(); crowdCheer(2.5); } else sadTrombone();
   document.getElementById('btn-resume').style.display='none';
-  document.getElementById('btn-rematch').style.display='inline-block';
+  // Only the host can start another match. A client 'rematch' just tells them to
+  // wait, which is a dead button -- hide it and let the host drive.
+  const canRematch = NET.role === 'solo' || NET.role === 'host';
+  const rb = document.getElementById('btn-rematch');
+  rb.style.display = canRematch ? 'inline-block' : 'none';
+  rb.textContent = NET.role === 'host' ? 'RUN IT BACK (NEW ROUND)' : 'RUN IT BACK';
+  const lb = document.getElementById('btn-lobby');
+  lb.textContent = NET.role === 'solo' ? 'BACK TO THE HOLLER' : 'LEAVE THE GAME';
+  if(NET.role === 'client'){
+    document.getElementById('overlay-sub').innerHTML +=
+      '<div style="margin-top:14px;color:#c9a15f;font-style:italic">Waitin\' on the host to run it back…</div>';
+  }
   ov.style.display='flex';
   refreshNav();
 }
@@ -8859,6 +8870,11 @@ function renderWaitroom(){
     ? "Yer the host — yer machine runs the game."
     : "Yer connected. Waitin' on the host to start.";
   wrEl('wr-start').style.display = NET.role === 'host' ? '' : 'none';
+  const cl = wrEl('wr-code-label');
+  if(cl) cl.textContent = NET.role === 'host' ? 'Room code — tell yer people' : "Yer in room";
+  const cp = wrEl('wr-copy');
+  // a guest inviting more guests is fine, but lead with the plainer label
+  if(cp) cp.textContent = NET.role === 'host' ? '📋 COPY INVITE LINK' : '📋 COPY LINK';
   const rel = wrEl('wr-relay');
   if(rel){
     if(NET.role === 'client'){
