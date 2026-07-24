@@ -108,8 +108,8 @@ Object.defineProperty(global, 'navigator', { value: { getGamepads: ()=>[fakePad]
 // ---- load game ----
 const fs=require('fs');
 const src=fs.readFileSync('/tmp/game.js','utf8');
-eval(src + '\n;global.__G={startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,camLook,camAim,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,carForward,updateCamera,resetKickoff,setBallCam,ARENA,WALL_R,BOOST_DRAIN,BALL_R,MAX_SPEED,MAX_DRIVE,SUPERSONIC,uu,FLIP_WINDOW};');
-const {startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,camLook,camAim,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,carForward,updateCamera,resetKickoff,setBallCam,ARENA,WALL_R,BOOST_DRAIN,BALL_R,MAX_SPEED,MAX_DRIVE,SUPERSONIC,uu,FLIP_WINDOW} = global.__G;
+eval(src + '\n;global.__G={startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,camLook,camAim,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,carForward,updateCamera,resetKickoff,setBallCam,carBallCollide,CAR_COLL_R,ARENA,WALL_R,BOOST_DRAIN,BALL_R,MAX_SPEED,MAX_DRIVE,SUPERSONIC,uu,FLIP_WINDOW};');
+const {startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,camLook,camAim,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,carForward,updateCamera,resetKickoff,setBallCam,carBallCollide,CAR_COLL_R,ARENA,WALL_R,BOOST_DRAIN,BALL_R,MAX_SPEED,MAX_DRIVE,SUPERSONIC,uu,FLIP_WINDOW} = global.__G;
 
 // ---- simulate ----
 function frame(){ const fn=rafQueue.shift(); if(fn) fn(); while(pendingTimeouts.length) pendingTimeouts.shift()(); }
@@ -512,6 +512,34 @@ game.player.wallAxis=null; game.player.up.set(0,1,0); game.player.pitch=0;
   }
   setBallCam(true);
   console.log('camera keeps the car on screen at the wall base, up the wall, in corners and in goal');
+}
+
+// --- REPORTED: driving straight THROUGH the ball without touching it ---
+// A discrete point-in-sphere test misses when car and ball swap sides between
+// frames. Fire the ball at a car fast enough to cross the whole contact zone in
+// one step and assert the touch still registers.
+{
+  const t = game.player;
+  const rr = BALL_R + CAR_COLL_R*t.veh.scale;
+  let missed = 0, caught = 0;
+  for(const speed of [60, 90, 130, 180]){          // well past what a real rally reaches
+    for(const dt of [1/60, 1/30]){
+      t.pos.set(0,0,0); t.vel.set(0,0,0); t.yaw=0;
+      t.wallAxis=null; t.up.set(0,1,0); t.pitch=0; t.dead=0;
+      // start clear on one side, travel far enough to end clear on the other
+      const travel = speed*dt;
+      if(travel < rr*2) continue;                  // not a tunnelling case
+      ball.pos.set(0, uu(75), -(travel*0.5));
+      ball.vel.set(0, 0, speed);
+      const before = ball.vel.z;
+      ball.pos.addScaledVector(ball.vel, dt);      // the frame's motion, as updateBall does
+      carBallCollide(t, dt);
+      if(ball.vel.z === before) missed++; else caught++;
+    }
+  }
+  if(missed) throw new Error('ball tunnelled through the car in '+missed+' case(s)');
+  if(!caught) throw new Error('tunnelling test never exercised a real case');
+  console.log('swept ball collision OK — '+caught+' fast passes all registered');
 }
 
 // --- REPORTED: "camera keeps readjusting / screen shaking" ---

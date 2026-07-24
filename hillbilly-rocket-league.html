@@ -5067,7 +5067,12 @@ const WALL_R = uu(256);                // curved floor<->wall ramp        = 4.1
 const WALL_CLIMB_MIN = uu(300);        // speed needed to grab a wall     = 4.8
 const WALL_STICK_MIN = uu(300);        // below this a steep surface lets go of ya
 const UP_Y = { x:0, y:1, z:0 };
-const CAR_COLL_R = uu(59);             // half of RL's 118uu car length   = 0.95
+// RL's hitbox is a BOX (118 long x 84 wide); half its LENGTH as a sphere radius
+// under-covers the car badly — measured, the contact sphere was 0.94 against a
+// visible half-width of 1.19, so the ball could sit visibly ON the bodywork with
+// no contact ever firing. That gap is the "I drove straight through it" bug.
+// Sized to the actual mesh instead.
+const CAR_COLL_R = uu(74);             // ~1.19 — covers the visible bodywork
 // live gameplay-modifier multipliers (Maw's Wildcards bend these; 1 = normal)
 let gravCarMul = 1, gravBallMul = 1, gripMul = 1, topMul = 1, boostFree = false;
 
@@ -7935,25 +7940,25 @@ function updateSplats(dt){
 // well overhead before raining back down. Deliberately over the top; that's the joke.
 const geysers = [];
 function bloodSpray(x, y, z, dx, dz, power){    // one-shot lick of spray (small hits)
-  emitBlood(x, y, z, dx, dz, power, Math.round(16 + power*10));
+  emitBlood(x, y, z, dx, dz, power, Math.round(40 + power*26));
 }
 function emitBlood(x, y, z, dx, dz, power, n){
   for(let i=0;i<n;i++){
-    const spread = 1.15;
+    const spread = 1.5;                                    // wide cone = atomised, not a jet
     const vx = dx*power*(0.35+Math.random()*0.9) + (Math.random()-0.5)*power*spread;
     const vz = dz*power*(0.35+Math.random()*0.9) + (Math.random()-0.5)*power*spread;
     const up = power*(0.75 + Math.random()*1.35);          // the fountain
     spawnPart(x + (Math.random()-0.5)*0.6, y + Math.random()*0.7, z + (Math.random()-0.5)*0.6,
       vx, up, vz,
-      BLOOD[(Math.random()*BLOOD.length)|0], 0.75+Math.random()*0.75,
-      uu(26) + Math.random()*uu(60));                      // fat globs
+      BLOOD[(Math.random()*BLOOD.length)|0], 0.45+Math.random()*0.5,
+      uu(4) + Math.random()*uu(13));                       // fine droplets, not bricks
   }
 }
 // power ~ how hard it blows, scale ~ how big the whole gag is
 function bloodGeyser(x, y, z, dx, dz, power, scale){
   const sc = scale || 1;
-  geysers.push({ x, y, z, dx, dz, power, sc, t: 0, life: 0.72, next: 0 });
-  emitBlood(x, y, z, dx, dz, power*1.25, Math.round(34*sc));   // opening burst
+  geysers.push({ x, y, z, dx, dz, power, sc, t: 0, life: 0.45, next: 0 });   // sharp burst, not a volcano
+  emitBlood(x, y, z, dx, dz, power*1.25, Math.round(105*sc));  // opening burst: a sudden mist
   for(let i=0;i<Math.round(4*sc);i++){                          // ring of pooling
     const a = Math.random()*Math.PI*2, d = (0.6+Math.random()*1.6)*sc;
     addSplat(x + Math.cos(a)*d, z + Math.sin(a)*d, (0.5+Math.random()*0.7)*sc);
@@ -7967,9 +7972,9 @@ function updateGeysers(dt){
     if(gy.life <= 0){ geysers.splice(i,1); continue; }
     gy.next -= dt;
     if(gy.next <= 0){
-      gy.next = 0.055;
+      gy.next = 0.035;                                    // tighter pulses = continuous spray
       const fade = Math.max(0.25, gy.life/0.72);          // pumps hard, then tails off
-      emitBlood(gy.x, gy.y, gy.z, gy.dx, gy.dz, gy.power*fade, Math.round(14*gy.sc*fade));
+      emitBlood(gy.x, gy.y, gy.z, gy.dx, gy.dz, gy.power*fade, Math.round(30*gy.sc*fade));
     }
   }
 }
@@ -8945,10 +8950,44 @@ let lastSaveMs = -1e9;
 function carBallCollide(c, dt){
   if(c.dead > 0) return;
   const preVx = ball.vel.x;
-  const hitPos = c.pos.clone(); hitPos.y += 1.2*c.veh.scale;
-  const d = ball.pos.clone().sub(hitPos);
-  const dist = d.length();
+  // The +1.2 here was tuned when cars were ~3.5x bigger; on an RL-scale car that
+  // floated the contact sphere clean above the roof. Ride height now follows the car.
+  const hitPos = c.pos.clone();
+  hitPos.addScaledVector(c.up || UP_Y, uu(75)*c.veh.scale);
+  let d = ball.pos.clone().sub(hitPos);
+  let dist = d.length();
   const rr = BALL_R + CAR_COLL_R*c.veh.scale;
+
+  // ---- SWEPT TEST (fixes driving straight THROUGH the ball) ----
+  // A discrete point-in-sphere test only sees where things are RIGHT NOW. A boosting
+  // car (36.8/s) closing on a struck ball (up to ~96/s) covers over 4 units in a
+  // frame against a 2.4-unit contact radius, so they swap sides between frames and
+  // no touch is ever registered. Sweep the relative motion over the frame instead
+  // and, if they passed within contact range, rewind the ball to that moment.
+  if(dist >= rr && dt > 0){
+    const rv = ball.vel.clone().sub(c.vel);          // relative motion this frame
+    const p0 = d.clone().addScaledVector(rv, -dt);   // where it was at frame start
+    const vv = rv.lengthSq();
+    if(vv > 1e-6){
+      const tc = THREE.MathUtils.clamp(-p0.dot(rv)/vv, 0, dt);   // closest approach
+      const closest = p0.clone().addScaledVector(rv, tc);
+      if(closest.length() < rr){                     // they DID pass through each other
+        d = closest.clone(); dist = d.length();
+        // Dead-centre pass: the contact normal is ambiguous. Pointing it straight up
+        // (the obvious guess) is perpendicular to the ball's travel, so the impulse
+        // computed to exactly ZERO and the ball sailed on untouched — a hit that
+        // registered but did nothing. Oppose the approach instead, which is what a
+        // head-on contact actually does.
+        if(dist < 0.001){
+          d.copy(rv).multiplyScalar(-1);
+          if(d.lengthSq() < 1e-6) d.set(0,1,0);
+          d.normalize(); dist = 0.01;
+        }
+        ball.pos.copy(hitPos).addScaledVector(d, dist);   // rewind to the contact moment
+      }
+    }
+  }
+
   if(dist < rr && dist > 0.001){
     const n = d.multiplyScalar(1/dist);
     // separate

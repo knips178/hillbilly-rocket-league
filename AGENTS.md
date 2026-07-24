@@ -57,6 +57,23 @@ MA-rated redneck-comedy Rocket League clone, solo vs bots. One self-contained Th
   x1.9 ball power, wins car contact, lower demo bar). The pot needs its ARM delay or the killer
   auto-eats it instantly. clearRoadkill() on match start.
 
+## Ball contact — "I drove straight through it" (three causes, all fixed)
+
+1. **Contact radius under-covered the car.** `CAR_COLL_R` was half of RL's 118uu car LENGTH used as
+   a sphere radius — measured 0.94 against a visible half-width of 1.19, so the ball could sit
+   visibly ON the bodywork with no contact firing. RL's hitbox is a BOX; a sphere sized off its
+   length is simply too small. Now `uu(74)`, sized to the actual mesh.
+2. **No swept test.** A discrete point-in-sphere check only sees where things are *right now*. A
+   boosting car closing on a struck ball covers more than the contact diameter in one frame, so they
+   swap sides between frames and nothing registers. `carBallCollide` now sweeps the relative motion
+   over the frame and rewinds the ball to the contact moment.
+3. **Dead-centre passes registered but did nothing.** The fallback contact normal pointed straight
+   up, which is perpendicular to the ball's travel, so the impulse computed to exactly zero. It now
+   opposes the approach direction.
+
+Contact height follows `c.up`, so it stays on the bodywork while wall-riding.
+Harness: sweeps 48 combinations of offset x speed x framerate; every one must register a touch.
+
 ## GORE (MA-rated) — cartoon register, not photoreal
 
 Blood and giblets on roadkill and on supersonic demolitions. Deliberately styled as a Looney Tunes
