@@ -5703,6 +5703,21 @@ function makeHick(){
   return grp;
 }
 // low-poly barnyard animals
+// At CRITTER_SCALE these are small on screen, so what reads is SILHOUETTE and
+// COLOUR CONTRAST, not polygon count. Hence: tails and ears that break the outline,
+// and a per-spawn tint so a field of chickens isn't one repeated white blob.
+// Plain arithmetic on the hex — no THREE.Color, which keeps this working under the
+// headless harness stub as well as in the browser.
+function critterTint(base, spread){
+  const sp = spread || 0.18;
+  const k = 1 + (Math.random()-0.5)*sp*2;              // overall lightness wobble
+  const ch = i => {
+    const v = (base >> (i*8)) & 0xff;
+    const j = v * k + (Math.random()-0.5)*18;          // plus a touch of per-channel drift
+    return Math.max(0, Math.min(255, Math.round(j)));
+  };
+  return (ch(2) << 16) | (ch(1) << 8) | ch(0);
+}
 function makeAnimal(kind){
   const grp = new THREE.Group();
   if(kind==='cow'){
@@ -5712,26 +5727,39 @@ function makeAnimal(kind){
     [0.32,-0.32].forEach(z=>{ const hn=new THREE.Mesh(new THREE.ConeGeometry(0.12,0.4,6), new THREE.MeshLambertMaterial({color:0xe8e0c8})); hn.position.set(1.4,2.15,z); grp.add(hn); });
     [[0.9,0.5],[0.9,-0.5],[-0.9,0.5],[-0.9,-0.5]].forEach(([x,z])=>{ const lg=new THREE.Mesh(new THREE.CylinderGeometry(0.18,0.18,1.0,6), new THREE.MeshLambertMaterial({color:0x2a2a2a})); lg.position.set(x,0.5,z); grp.add(lg); });
     const ud=new THREE.Mesh(new THREE.SphereGeometry(0.32,8,6), new THREE.MeshLambertMaterial({color:0xf0b0b0})); ud.position.set(-0.6,0.7,0); grp.add(ud);
+    const tail=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.03,0.9,5), new THREE.MeshLambertMaterial({color:0x3a3229}));
+    tail.rotation.z=0.25; tail.position.set(-1.35,1.35,0); grp.add(tail);
+    const switchEnd=new THREE.Mesh(new THREE.SphereGeometry(0.11,6,5), new THREE.MeshLambertMaterial({color:0x2a2419}));
+    switchEnd.position.set(-1.48,0.95,0); grp.add(switchEnd);
   } else if(kind==='pig'){
-    const pink=new THREE.MeshLambertMaterial({color:0xe89aa6});
+    const pink=new THREE.MeshLambertMaterial({color:critterTint(0xe89aa6,0.22)});
     const body=new THREE.Mesh(new THREE.BoxGeometry(1.8,1.0,1.0),pink); body.position.y=0.9; grp.add(body);
     const head=new THREE.Mesh(new THREE.BoxGeometry(0.7,0.7,0.7),pink); head.position.set(1.1,1.0,0); grp.add(head);
     const snout=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.22,0.25,8),new THREE.MeshLambertMaterial({color:0xd98a96})); snout.rotation.z=Math.PI/2; snout.position.set(1.5,0.95,0); grp.add(snout);
     [0.35,-0.35].forEach(z=>{ const ear=new THREE.Mesh(new THREE.ConeGeometry(0.16,0.3,5),pink); ear.position.set(1.0,1.4,z); grp.add(ear); });
     [[0.6,0.35],[0.6,-0.35],[-0.6,0.35],[-0.6,-0.35]].forEach(([x,z])=>{ const lg=new THREE.Mesh(new THREE.CylinderGeometry(0.14,0.14,0.6,6),pink); lg.position.set(x,0.3,z); grp.add(lg); });
+    const curl=new THREE.Mesh(new THREE.TorusGeometry(0.13,0.04,4,8,4.6),pink);   // curly tail
+    curl.rotation.y=Math.PI/2; curl.position.set(-0.95,1.05,0); grp.add(curl);
   } else if(kind==='chicken'){
-    const wh=new THREE.MeshLambertMaterial({color:0xf2f2ea});
+    const wh=new THREE.MeshLambertMaterial({color:critterTint(0xf2f2ea,0.30)});   // white / buff / speckled
     const body=new THREE.Mesh(new THREE.SphereGeometry(0.5,8,6),wh); body.position.y=0.7; body.scale.set(1,1.1,1.3); grp.add(body);
     const head=new THREE.Mesh(new THREE.SphereGeometry(0.28,8,6),wh); head.position.set(0,1.2,0.4); grp.add(head);
     const comb=new THREE.Mesh(new THREE.BoxGeometry(0.1,0.22,0.3),new THREE.MeshLambertMaterial({color:0xcc3322})); comb.position.set(0,1.45,0.4); grp.add(comb);
     const beak=new THREE.Mesh(new THREE.ConeGeometry(0.1,0.25,5),new THREE.MeshLambertMaterial({color:0xe0a02a})); beak.rotation.x=Math.PI/2; beak.position.set(0,1.15,0.72); grp.add(beak);
     [0.12,-0.12].forEach(x=>{ const lg=new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,0.4,4),new THREE.MeshLambertMaterial({color:0xe0a02a})); lg.position.set(x,0.2,0); grp.add(lg); });
+    const tail=new THREE.Mesh(new THREE.ConeGeometry(0.3,0.42,4),wh);            // tail fan = reads as a bird
+    tail.rotation.set(-0.9,Math.PI/4,0); tail.position.set(0,0.92,-0.55); grp.add(tail);
+    const wattle=new THREE.Mesh(new THREE.BoxGeometry(0.07,0.13,0.1),new THREE.MeshLambertMaterial({color:0xcc3322}));
+    wattle.position.set(0,1.02,0.6); grp.add(wattle);
   } else { // goat
-    const gr=new THREE.MeshLambertMaterial({color:0xd8d2c4});
+    const gr=new THREE.MeshLambertMaterial({color:critterTint(0xd8d2c4,0.26)});
     const body=new THREE.Mesh(new THREE.BoxGeometry(1.6,0.9,0.9),gr); body.position.y=1.0; grp.add(body);
     const head=new THREE.Mesh(new THREE.BoxGeometry(0.6,0.6,0.6),gr); head.position.set(1.0,1.2,0); grp.add(head);
     [0.2,-0.2].forEach(z=>{ const hn=new THREE.Mesh(new THREE.ConeGeometry(0.1,0.4,5),new THREE.MeshLambertMaterial({color:0x8a7a5a})); hn.position.set(0.95,1.62,z); hn.rotation.x=-0.5; grp.add(hn); });
     const beard=new THREE.Mesh(new THREE.BoxGeometry(0.2,0.35,0.15),gr); beard.position.set(1.22,0.85,0); grp.add(beard);
+    [0.28,-0.28].forEach(z=>{ const ear=new THREE.Mesh(new THREE.BoxGeometry(0.28,0.1,0.14),gr);
+      ear.rotation.z=-0.35; ear.position.set(0.86,1.3,z); grp.add(ear); });      // floppy ears break the box outline
+    const tl=new THREE.Mesh(new THREE.BoxGeometry(0.22,0.16,0.12),gr); tl.rotation.z=0.7; tl.position.set(-0.85,1.28,0); grp.add(tl);
     [[0.5,0.3],[0.5,-0.3],[-0.5,0.3],[-0.5,-0.3]].forEach(([x,z])=>{ const lg=new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.12,0.9,6),new THREE.MeshLambertMaterial({color:0x555044})); lg.position.set(x,0.45,z); grp.add(lg); });
   }
   return grp;
@@ -7842,7 +7870,8 @@ function spawnCrosser(){
   g.rotation.y = (kind==='duck') ? (dir>0?Math.PI/2:-Math.PI/2) : (dir>0?0:Math.PI);
   scene.add(g);
   g.position.y = yOff;
-  crossers.push({ g, kind, dir, yOff, spd: uu(200)+Math.random()*uu(180), dead:false, vx:0, vy:0, vz:0, spin:0, ttl:3 });
+  crossers.push({ g, kind, dir, yOff, gait: 6+Math.random()*3, phase: Math.random()*6.283,
+    spd: uu(200)+Math.random()*uu(180), dead:false, vx:0, vy:0, vz:0, spin:0, ttl:3 });
 }
 function squashCritter(cr, byCar){
   cr.dead = true; cr.ttl = 2.6;
@@ -7885,8 +7914,11 @@ function updateCrossers(dt){
     }
     // waddle across
     cr.g.position.x += cr.dir * cr.spd * dt;
-    cr.g.position.y = cr.yOff + Math.abs(Math.sin(t*7 + i)) * 0.28;
-    cr.g.rotation.z = Math.sin(t*9 + i) * 0.09;
+    // waddle scaled to the animal — 0.28 was tuned when critters were 2.4x bigger
+    // and now reads as a pogo hop. Each critter carries its own gait phase so a
+    // line of 'em doesn't bob in lockstep.
+    cr.g.position.y = cr.yOff + Math.abs(Math.sin(t*cr.gait + cr.phase)) * 0.28 * CRITTER_SCALE;
+    cr.g.rotation.z = Math.sin(t*cr.gait*1.3 + cr.phase) * 0.09;
     if(Math.abs(cr.g.position.x) > ARENA.halfX + 8){ scene.remove(cr.g); disposeTree(cr.g); crossers.splice(i,1); continue; }
     // squashed by a rig?
     let hit = false;
