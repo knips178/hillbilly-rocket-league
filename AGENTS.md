@@ -154,7 +154,7 @@ strip it with `-vn`). Re-encoded to **48 kbps mono AAC = 2.4 MB base64**, taking
 fidelity, and page weight is the thing that makes this joinable from a phone on cell data.
 If it ever needs to shrink, 40 kbps saves another ~0.4 MB.
 
-**The lobby loops the first 4 seconds** (`window.MENU_B64`) and it must NOT use an `<audio>` element.
+**The lobby loops the first 7.38 seconds** (`window.MENU_B64`) and it must NOT use an `<audio>` element.
 It did, and it stuttered at the wrap. Two separate causes:
 1. **AAC/MP3 encoders add silent priming + padding samples to every file.** Element looping plays
    straight through them, and that gap IS the stutter. No amount of fading fixes it — the payload is
@@ -166,8 +166,14 @@ It did, and it stuttered at the wrap. Two separate causes:
 Buffering is correct HERE precisely because it's 4 seconds; the 5-minute match track stays an
 `<audio>` element for the memory reason below. Verified: buffer decodes to exactly 4.0000s and the
 head/tail sample step across the seam is 0.029 of full scale, i.e. no discontinuity to click on.
-To change the length, re-slice the WAV (`-t <seconds>`, **no fade** — a fade would dip the volume at
-every wrap) and swap the payload; the playback code is length-agnostic.
+To change the length: pick the point in the loop-finder tool, then slice **sample-exactly** in node
+(not `ffmpeg -t`, which lands mid-cycle) with this recipe, which is what actually made it click-free:
+1. snap both ends to **rising zero crossings**, then
+2. apply an **8 ms fade in and out** so both ends sit at true silence.
+Step 1 alone was NOT enough here — measured seam 0.0623 raw, 0.0488 after snapping (both ends cross
+zero but with different slope and energy), and 0.00000 after the micro-fade. 8 ms is below the ear's
+envelope resolution on a plucked note: no audible dip, just no click. A *long* fade WOULD dip
+audibly — keep it under ~10 ms. The playback code is length-agnostic.
 
 Played through an `<audio>` element, NOT a decoded AudioBuffer — the track is 5 minutes and would
 sit ~50 MB in memory as a buffer for no benefit. Routed through `masterGain` via
