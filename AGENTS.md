@@ -94,7 +94,14 @@ Sizes were then raised **+50%** on user feedback (big jar 1.35, jug 2.03, roadki
 on the grass — it is now an actual flattened carcass: squashed body, splayed legs pointing skyward,
 lolling tongue. Reads instantly and is funnier.
 
-Critters carry a faint ground halo (`userData.halo`, kept flat as they waddle). Deliberately a pool
+**Ramp contact is GEOMETRIC, not speed-gated.** Grabbing a wall used to require `WALL_CLIMB_MIN` of
+speed, so a slow or stalled car never attached — and then fell through to the flat-wall clamp, which
+sits a whole `WALL_R` outside the curved surface. Result: ya drove on the floor INSIDE the ramp.
+Speed decides how far UP ya get (gravity already handles that); it must never decide whether ya
+touch the ramp at all. Harness sweeps 4 walls x 3 crawl speeds and asserts the car is never past the
+fillet surface.
+
+Critters carry a bright ground halo AND a soft vertical beacon (billboarded at the camera, additive) (`userData.halo`, kept flat as they waddle). Deliberately a pool
 of light UNDER them, not an emissive body — glowing the animal itself fights the arena lighting and
 reads as a rendering bug.
 

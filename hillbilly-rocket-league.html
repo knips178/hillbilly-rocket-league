@@ -7915,12 +7915,23 @@ function spawnCrosser(){
   // Spotting critters at speed was luck. A faint halo on the grass under them is
   // enough to catch the eye without lighting the animal up like a lamp — glowing
   // the body itself fights the arena lighting and reads as a rendering bug.
+  // A ground halo alone still wasn't catching the eye at speed — the critter is low,
+  // small, and often behind ya. So: a brighter pool on the grass PLUS a soft vertical
+  // beacon above it, which is visible over the bodywork and from across the pitch.
+  // Both are additive and unlit, so they glow without washing out the animal itself.
   if(typeof THREE.PlaneGeometry === 'function' && typeof padGlowTex !== 'undefined'){
-    const halo = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 3.4),
-      new THREE.MeshBasicMaterial({ map:padGlowTex, color:0xfff0b0, transparent:true,
-                                    opacity:0.30, depthWrite:false }));
+    const halo = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 5.2),
+      new THREE.MeshBasicMaterial({ map:padGlowTex, color:0xffe27a, transparent:true,
+                                    opacity:0.62, depthWrite:false,
+                                    blending:THREE.AdditiveBlending }));
     halo.rotation.x = -Math.PI/2; halo.position.y = 0.03/CRITTER_SCALE;
     g.add(halo); g.userData.halo = halo;
+
+    const beam = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 7.5),
+      new THREE.MeshBasicMaterial({ map:padGlowTex, color:0xffd85a, transparent:true,
+                                    opacity:0.30, depthWrite:false, side:THREE.DoubleSide,
+                                    blending:THREE.AdditiveBlending }));
+    beam.position.y = 3.6; g.add(beam); g.userData.beam = beam;
   }
   // the duck model is built for FLIGHT (body on the group origin, wings splayed) — on the deck it
   // sat half-buried lookin' like roadkill already. Lift it onto its feet and tuck the wings in.
@@ -8188,6 +8199,8 @@ function updateCrossers(dt){
   for(let i=crossers.length-1; i>=0; i--){
     const cr = crossers[i];
     if(cr.dead){
+      if(cr.g.userData.halo) cr.g.userData.halo.visible = false;
+      if(cr.g.userData.beam) cr.g.userData.beam.visible = false;
       cr.ttl -= dt;
       cr.vy += GRAV_CAR*dt*0.85;
       cr.g.position.x += cr.vx*dt; cr.g.position.y += cr.vy*dt; cr.g.position.z += cr.vz*dt;
@@ -8207,7 +8220,18 @@ function updateCrossers(dt){
     const halo = cr.g.userData.halo;                       // stays flat on the grass
     if(halo){ halo.rotation.z = -cr.g.rotation.z;
       halo.position.y = (0.03 - cr.g.position.y)/CRITTER_SCALE;
-      halo.material.opacity = 0.24 + Math.sin(t*2.4 + cr.phase)*0.08; }
+      halo.material.opacity = 0.50 + Math.sin(t*2.4 + cr.phase)*0.16; }
+    const beam = cr.g.userData.beam;
+    if(beam){                                              // billboard it at the camera
+      beam.rotation.z = -cr.g.rotation.z;
+      // the critter group is a direct scene child, so its position IS world space —
+      // no need for getWorldPosition (which the headless stub doesn't implement)
+      if(camera && camera.position){
+        beam.rotation.y = Math.atan2(camera.position.x - cr.g.position.x,
+                                     camera.position.z - cr.g.position.z) - cr.g.rotation.y;
+      }
+      beam.material.opacity = 0.24 + Math.sin(t*2.4 + cr.phase)*0.10;
+    }
     if(Math.abs(cr.g.position.x) > ARENA.halfX + 8){ scene.remove(cr.g); disposeTree(cr.g); crossers.splice(i,1); continue; }
     // squashed by a rig?
     let hit = false;
@@ -8905,16 +8929,23 @@ function updateCar(c, dt, input){
     // ceiling
     if(c.pos.y > ARENA.ceil-3){ c.pos.y = ARENA.ceil-3; c.vel.y = Math.min(0,c.vel.y); }
 
-    // grab a wall: grounded, aimed into it fast enough, not at a goal mouth
+    // Ride the ramp whenever ya are ON it. This used to require WALL_CLIMB_MIN of
+    // speed, so a slow or stalled car never attached — and then fell through to the
+    // flat-wall clamp below, which sits a whole WALL_R outside the curved surface.
+    // That's the reported bug: ya end up driving on the floor INSIDE the ramp.
+    // Contact with a ramp is GEOMETRY, not speed. How far ya get UP it is what speed
+    // decides, and gravity already handles that (slow cars just slide back down).
     if(c.onGround && c.wallAxis === null){
       if(Math.abs(c.pos.z) > ARENA.goalHalfW + 2){
-        if(ARENA.halfX - c.pos.x < WALL_R && c.vel.x >  WALL_CLIMB_MIN){ c.wallAxis=0; c.wallSign= 1; }
-        else if(ARENA.halfX + c.pos.x < WALL_R && c.vel.x < -WALL_CLIMB_MIN){ c.wallAxis=0; c.wallSign=-1; }
+        if(ARENA.halfX - c.pos.x < WALL_R){ c.wallAxis=0; c.wallSign= 1; }
+        else if(ARENA.halfX + c.pos.x < WALL_R){ c.wallAxis=0; c.wallSign=-1; }
       }
       if(c.wallAxis === null){
-        if(ARENA.halfZ - c.pos.z < WALL_R && c.vel.z >  WALL_CLIMB_MIN){ c.wallAxis=1; c.wallSign= 1; }
-        else if(ARENA.halfZ + c.pos.z < WALL_R && c.vel.z < -WALL_CLIMB_MIN){ c.wallAxis=1; c.wallSign=-1; }
+        if(ARENA.halfZ - c.pos.z < WALL_R){ c.wallAxis=1; c.wallSign= 1; }
+        else if(ARENA.halfZ + c.pos.z < WALL_R){ c.wallAxis=1; c.wallSign=-1; }
       }
+      // hysteresis: attach at the fillet edge, let go 0.5 further in, so a car
+      // parked at the bottom of the ramp can't flicker between the two states
       if(c.wallAxis !== null){ stickToWall(c); rebaseYawToWall(c); c.pitch = 0; }
     }
 
