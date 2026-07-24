@@ -80,6 +80,12 @@ Blood and giblets on roadkill and on supersonic demolitions. Deliberately styled
 splat: bright arterial reds (`BLOOD[]`), chunky low-poly giblets, comedic volume. That is both truer
 to the art style and funnier than anything photoreal would be at this poly count — keep it there.
 
+- **Blood has its OWN pool** (`mistPool`, 1500 billboarded sprites). Two reasons it must not borrow
+  the shared particle pool: that pool's primitive is a 0.7 **cube** (a cube reads as a block at any
+  size, which is why shrinking it never fixed "big blocks"), and it is only 320 across every effect
+  in the game, so a big burst instantly recycled its own droplets and could never look like "tons".
+  Sprites always face the camera, so they read as droplets. Measured on a player demo: **1248 live
+  droplets, a cloud 16 units high and 18 across.**
 - `bloodGeyser()` — the main event. A single burst looked stingy, so this registers an emitter that
   PUMPS over ~0.7s with a hard vertical component, fountaining overhead before raining back down.
   Deliberately over the top — that's the joke. `bloodSpray()` is the small one-shot lick.

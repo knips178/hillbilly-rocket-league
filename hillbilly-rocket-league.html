@@ -7934,31 +7934,84 @@ function updateSplats(dt){
   }
 }
 
-// --- the spray: a comically large GEYSER, not a puff ---
-// Single-burst looked stingy. A gag this size needs to ERUPT — so an emitter is
-// registered and pumps over ~0.7s, with a hard vertical component that fountains
-// well overhead before raining back down. Deliberately over the top; that's the joke.
+// --- the spray: a DEDICATED blood-mist system ---
+// Two reasons the old one read as "big blocks, small explosion":
+//   1. it borrowed the shared particle pool, whose primitive is a 0.7 CUBE — a cube
+//      reads as a block at any size — and
+//   2. that pool is only 320 across every effect in the game, so a big burst
+//      instantly recycled its own droplets and you never saw more than a handful.
+// So blood gets its own pool of tiny billboarded PLANES. Planes always face the
+// camera, so they read as droplets/mist instead of tumbling dice, and having their
+// own pool means a burst can be genuinely enormous without starving the dust.
+const MIST = 1500;
+const mistPool = [];
+const mistTex = makeCanvasTex(16, 16, (g,w,h)=>{
+  const grd = g.createRadialGradient(8,8,0, 8,8,8);
+  grd.addColorStop(0,   'rgba(255,80,90,1)');
+  grd.addColorStop(0.45,'rgba(190,18,42,1)');
+  grd.addColorStop(1,   'rgba(120,8,24,0)');
+  g.fillStyle = grd; g.fillRect(0,0,w,h);
+});
+let mistIdx = 0;
+(function buildMist(){
+  if(typeof THREE.Sprite !== 'function' || typeof THREE.SpriteMaterial !== 'function') return;
+  for(let i=0;i<MIST;i++){
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: mistTex, transparent:true, depthWrite:false, opacity:1 }));
+    sp.visible = false; sp.userData._shared = true;   // pooled: disposeTree must skip
+    scene.add(sp);
+    mistPool.push({ s: sp, vel:new THREE.Vector3(), life:0, max:1, size:1 });
+  }
+})();
+function spawnMist(x,y,z, vx,vy,vz, life, size){
+  if(!mistPool.length) return;
+  const p = mistPool[mistIdx = (mistIdx+1) % MIST];
+  p.s.visible = true; p.s.position.set(x,y,z);
+  p.s.scale.setScalar(size); p.s.material.opacity = 1;
+  p.vel.set(vx,vy,vz); p.life = life; p.max = life; p.size = size;
+}
+function updateMist(dt){
+  for(const p of mistPool){
+    if(p.life <= 0) continue;
+    p.life -= dt;
+    if(p.life <= 0){ p.s.visible = false; continue; }
+    p.vel.y += GRAV_BALL * dt;
+    p.vel.multiplyScalar(1 - Math.min(1, 1.6*dt));       // air drag: mist hangs, then falls
+    p.s.position.addScaledVector(p.vel, dt);
+    if(p.s.position.y < 0.02){                            // hits the deck
+      p.s.position.y = 0.02; p.vel.set(0,0,0);
+      if(Math.random() < 0.02) addSplat(p.s.position.x, p.s.position.z, 0.12+Math.random()*0.2);
+    }
+    const t = p.life / p.max;
+    p.s.material.opacity = Math.min(1, t*2.2);
+    p.s.scale.setScalar(p.size * (0.65 + t*0.35));
+  }
+}
+
 const geysers = [];
 function bloodSpray(x, y, z, dx, dz, power){    // one-shot lick of spray (small hits)
-  emitBlood(x, y, z, dx, dz, power, Math.round(40 + power*26));
+  emitBlood(x, y, z, dx, dz, power, Math.round(90 + power*40));
 }
 function emitBlood(x, y, z, dx, dz, power, n){
   for(let i=0;i<n;i++){
-    const spread = 1.5;                                    // wide cone = atomised, not a jet
-    const vx = dx*power*(0.35+Math.random()*0.9) + (Math.random()-0.5)*power*spread;
-    const vz = dz*power*(0.35+Math.random()*0.9) + (Math.random()-0.5)*power*spread;
-    const up = power*(0.75 + Math.random()*1.35);          // the fountain
-    spawnPart(x + (Math.random()-0.5)*0.6, y + Math.random()*0.7, z + (Math.random()-0.5)*0.6,
-      vx, up, vz,
-      BLOOD[(Math.random()*BLOOD.length)|0], 0.45+Math.random()*0.5,
-      uu(4) + Math.random()*uu(13));                       // fine droplets, not bricks
+    // Sample a full hemisphere, biased along the hit. That's what makes it read as
+    // an EXPLOSION rather than a jet — it goes everywhere at once.
+    const a = Math.random()*Math.PI*2;
+    const u = Math.random(), sinp = Math.sqrt(1-u*u);
+    let vx = Math.cos(a)*sinp, vy = u, vz = Math.sin(a)*sinp;
+    vx += dx*0.85; vz += dz*0.85;                         // lean it along the impact
+    const sp = power * (0.5 + Math.random()*2.6);         // huge spread = billowing cloud
+    spawnMist(x + (Math.random()-0.5)*0.35, y + (Math.random()-0.5)*0.35, z + (Math.random()-0.5)*0.35,
+      vx*sp, vy*sp*1.35 + power*0.5, vz*sp,
+      0.8 + Math.random()*1.2,
+      uu(9) + Math.random()*uu(26));                       // ~0.14-0.56: visible mist
   }
 }
 // power ~ how hard it blows, scale ~ how big the whole gag is
 function bloodGeyser(x, y, z, dx, dz, power, scale){
   const sc = scale || 1;
-  geysers.push({ x, y, z, dx, dz, power, sc, t: 0, life: 0.45, next: 0 });   // sharp burst, not a volcano
-  emitBlood(x, y, z, dx, dz, power*1.25, Math.round(105*sc));  // opening burst: a sudden mist
+  geysers.push({ x, y, z, dx, dz, power, sc, t: 0, life: 0.5, next: 0 });
+  emitBlood(x, y, z, dx, dz, power*1.6, Math.round(520*sc));   // opening burst: everything at once
   for(let i=0;i<Math.round(4*sc);i++){                          // ring of pooling
     const a = Math.random()*Math.PI*2, d = (0.6+Math.random()*1.6)*sc;
     addSplat(x + Math.cos(a)*d, z + Math.sin(a)*d, (0.5+Math.random()*0.7)*sc);
@@ -7972,9 +8025,9 @@ function updateGeysers(dt){
     if(gy.life <= 0){ geysers.splice(i,1); continue; }
     gy.next -= dt;
     if(gy.next <= 0){
-      gy.next = 0.035;                                    // tighter pulses = continuous spray
+      gy.next = 0.028;
       const fade = Math.max(0.25, gy.life/0.72);          // pumps hard, then tails off
-      emitBlood(gy.x, gy.y, gy.z, gy.dx, gy.dz, gy.power*fade, Math.round(30*gy.sc*fade));
+      emitBlood(gy.x, gy.y, gy.z, gy.dx, gy.dz, gy.power*fade, Math.round(85*gy.sc*fade));
     }
   }
 }
@@ -8018,6 +8071,7 @@ function updateGiblets(dt){
 }
 function clearGore(){
   geysers.length = 0;
+  for(const p of mistPool){ p.life = 0; p.s.visible = false; }
   for(const gb of giblets){ scene.remove(gb.g); disposeTree(gb.g); }
   giblets.length = 0;
   for(const sp of splats){ sp.life = 0; sp.m.visible = false; }
@@ -10656,6 +10710,7 @@ function animate(){
         tickRoadkills(dt);
         updateGiblets(dt);
         updateGeysers(dt);
+        updateMist(dt);
         updateSplats(dt);
       }
       NET.sendSnapshot();
