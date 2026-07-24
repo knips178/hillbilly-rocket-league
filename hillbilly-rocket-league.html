@@ -6862,7 +6862,7 @@ function addPad(x, z, big){
   // the ball, which is why the floor pickups looked oversized and cluttered. A
   // pickup should read at a glance without competing with the two things that
   // actually matter on the pitch.
-  const s = (big ? 0.30 : 0.22);
+  const s = (big ? 0.45 : 0.33);   // +50% on user feedback
   const glass = new THREE.MeshLambertMaterial({ color:0xdfe6cf, transparent:true, opacity:0.42 });
   const shine = new THREE.MeshLambertMaterial({ color:0xf0b24a, emissive: big?0xa8660c:0x7a4a08 });
   const lid   = new THREE.MeshLambertMaterial({ color:0xb9c0c7, emissive:0x22282c });
@@ -7544,7 +7544,7 @@ function makeCar(name, team, vehIdx, isPlayer){
     onGround:true, jumps:2, boost:33, flip:0, flipDir:0, rollVis:0, steerVis:0,
     up:new THREE.Vector3(0,1,0), wallAxis:null, wallSign:1, pitch:0, jumpHoldT:0, jumpN:null, flipT:0, slideT:0,   // surface normal + aerial nose pitch
     aiTimer:Math.random()*2, aiJumpCd:0, goals:0, touches:0, demos:0,
-    specialCd:0, spinT:0, shineT:0, stewT:0, demoStreak:0, demoStreakT:0, aiSpecialCd:2+Math.random()*3,
+    specialCd:0, spinT:0, shineT:0, stewT:0, killBoostT:0, demoStreak:0, demoStreakT:0, aiSpecialCd:2+Math.random()*3,
     persona: isPlayer ? null : PERSONAS[Math.floor(Math.random()*PERSONAS.length)],
   };
   cars.push(car);
@@ -7825,7 +7825,7 @@ function buildMoonJug(){
   // Built at ~4.65 units tall — twice the height of the car. Scaled as a group so
   // the design is untouched and only the footprint changes. Still the biggest
   // pickup on the pitch, which is right: it's the rare one.
-  g.scale.setScalar(0.26);
+  g.scale.setScalar(0.39);   // +50% on user feedback
   const body = new THREE.Mesh(new THREE.CylinderGeometry(1.5,1.7,3.4,12),
     new THREE.MeshLambertMaterial({ color:0xcfe0c0, emissive:0x2a4a10, transparent:true, opacity:0.92 }));
   body.position.y = 2.0; g.add(body);
@@ -7877,7 +7877,7 @@ function tickMoonJug(dt){
 // behind a mess o' ROADKILL STEW — eat it for BUMPER BEEF (heavy hits + you plow through folks).
 const crossers = [];
 let crossT = 9;
-const CRITTER_SCALE = 0.60;   // animal models vs an RL-scale car
+const CRITTER_SCALE = 0.90;   // animal models vs an RL-scale car
 const ARENA_CRITTERS = [
   ['chicken','pig','goat'],      // Maw's Barn
   ['chicken','goat'],            // Frozen Pond
@@ -7912,6 +7912,16 @@ function spawnCrosser(){
   // size against an RL-scale car (still a touch oversized — it's funnier, and ya need
   // to see what yer about to flatten).
   g.scale.setScalar(CRITTER_SCALE);
+  // Spotting critters at speed was luck. A faint halo on the grass under them is
+  // enough to catch the eye without lighting the animal up like a lamp — glowing
+  // the body itself fights the arena lighting and reads as a rendering bug.
+  if(typeof THREE.PlaneGeometry === 'function' && typeof padGlowTex !== 'undefined'){
+    const halo = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 3.4),
+      new THREE.MeshBasicMaterial({ map:padGlowTex, color:0xfff0b0, transparent:true,
+                                    opacity:0.30, depthWrite:false }));
+    halo.rotation.x = -Math.PI/2; halo.position.y = 0.03/CRITTER_SCALE;
+    g.add(halo); g.userData.halo = halo;
+  }
   // the duck model is built for FLIGHT (body on the group origin, wings splayed) — on the deck it
   // sat half-buried lookin' like roadkill already. Lift it onto its feet and tuck the wings in.
   let yOff = 0;
@@ -8143,6 +8153,16 @@ function squashCritter(cr, byCar){
   cr.spin = (Math.random()<0.5?-1:1) * (7 + Math.random()*7);
   critterYelp(cr.kind);
   thump(0.7);
+  // Bounty: 5 seconds of free boost for whoever flattened it. Rewards going out of
+  // yer way for a critter instead of ignoring them.
+  if(byCar && byCar.dead <= 0){
+    byCar.killBoostT = 5;
+    byCar.boost = 100;
+    if(byCar.isPlayer){
+      announce('ROADKILL! 5 SECONDS OF FREE SHINE!', 2.2);
+      rumble(220, 0.8, 0.5); beep(880, 0.09, 'triangle', 0.09, 260);
+    } else chatMsg(byCar.name, byCar.team, pick(['got one!','yeehaw, fresh meat!','splat!']));
+  }
   // feathers n' fur...
   for(let i=0;i<16;i++) spawnPart(cr.g.position.x, 1.2, cr.g.position.z,
     (Math.random()-0.5)*13, 3+Math.random()*9, (Math.random()-0.5)*13,
@@ -8184,6 +8204,10 @@ function updateCrossers(dt){
     // line of 'em doesn't bob in lockstep.
     cr.g.position.y = cr.yOff + Math.abs(Math.sin(t*cr.gait + cr.phase)) * 0.28 * CRITTER_SCALE;
     cr.g.rotation.z = Math.sin(t*cr.gait*1.3 + cr.phase) * 0.09;
+    const halo = cr.g.userData.halo;                       // stays flat on the grass
+    if(halo){ halo.rotation.z = -cr.g.rotation.z;
+      halo.position.y = (0.03 - cr.g.position.y)/CRITTER_SCALE;
+      halo.material.opacity = 0.24 + Math.sin(t*2.4 + cr.phase)*0.08; }
     if(Math.abs(cr.g.position.x) > ARENA.halfX + 8){ scene.remove(cr.g); disposeTree(cr.g); crossers.splice(i,1); continue; }
     // squashed by a rig?
     let hit = false;
@@ -8211,13 +8235,31 @@ function dropRoadkill(x, z){
   // The old brown "splat" disc under the pot is redundant now that real blood
   // splats land here, and it read as a mud puddle. Pot only, scaled down from a
   // 2-unit prop to something that sits on the grass instead of squatting on it.
-  g.scale.setScalar(0.42);
-  const pot = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.35, 1.5, 10),
-    new THREE.MeshLambertMaterial({ color:0x3a3a38 }));
-  pot.position.y = 1.05; g.add(pot);
-  const stew = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.0, 0.18, 10),
-    new THREE.MeshLambertMaterial({ color:0x8a5a20, emissive:0x2a1400 }));
-  stew.position.y = 1.85; g.add(stew);
+  g.scale.setScalar(0.63);   // +50% on user feedback
+  // A cylinder of stew read as a circle cake sittin' on the grass. This is ROADKILL:
+  // a flattened carcass, splayed legs pointin' at the sky, a lolling tongue. Reads
+  // instantly for what it is, and it's funnier.
+  const meat = new THREE.MeshLambertMaterial({ color:0x9c4a3c });
+  const fur  = new THREE.MeshLambertMaterial({ color:0x7a5a3a });
+  const carcass = new THREE.Mesh(new THREE.SphereGeometry(1.25, 10, 7), fur);
+  carcass.scale.set(1.25, 0.28, 0.95);                     // squashed flat
+  carcass.position.y = 0.34; g.add(carcass);
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.85, 9, 6), meat);
+  belly.scale.set(1.1, 0.22, 0.85); belly.position.set(0.12, 0.52, 0); g.add(belly);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 6), fur);
+  head.scale.set(1, 0.42, 0.9); head.position.set(-1.35, 0.3, 0.1); g.add(head);
+  const tongue = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.07, 0.2),
+    new THREE.MeshLambertMaterial({ color:0xc4707a }));
+  tongue.position.set(-1.8, 0.22, 0.1); tongue.rotation.z = 0.15; g.add(tongue);
+  [[0.55,0.62,0.35],[0.55,-0.62,-0.35],[-0.35,0.6,0.3],[-0.35,-0.6,-0.3]]
+    .forEach(([x,z,lean])=>{                               // four legs stickin' straight up
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.11,0.09,1.05,5), fur);
+      leg.position.set(x, 0.72, z); leg.rotation.z = lean*0.5; leg.rotation.x = lean*0.35;
+      g.add(leg);
+      const hoof = new THREE.Mesh(new THREE.BoxGeometry(0.17,0.16,0.17),
+        new THREE.MeshLambertMaterial({ color:0x2e2620 }));
+      hoof.position.set(x + lean*0.28, 1.24, z + lean*0.2); g.add(hoof);
+    });
   const glow = new THREE.Mesh(new THREE.SphereGeometry(2.4, 10, 8),
     new THREE.MeshBasicMaterial({ color:0xff9a4a, transparent:true, opacity:0.14, blending:THREE.AdditiveBlending, depthWrite:false }));
   glow.position.y = 1.3; g.add(glow);
@@ -8700,6 +8742,7 @@ function updateCar(c, dt, input){
   const f = carForward(c);
   // tick per-car gameplay timers (specials, spin, shine, demo streak)
   if(c.specialCd > 0) c.specialCd -= dt;
+  if(c.killBoostT > 0) c.killBoostT -= dt;   // roadkill bounty: free boost
   if(c.spinT > 0) c.spinT -= dt;
   if(c.shineT > 0){ c.shineT -= dt; if(c.shineT > 0 && Math.random()<0.6)
     spawnGlow(c.pos.x+(Math.random()-0.5)*3, 1+Math.random()*2, c.pos.z+(Math.random()-0.5)*3, 0, 6, 0, 0xa8ff70, 0.35, 0.9, -3); }
@@ -8709,7 +8752,7 @@ function updateCar(c, dt, input){
       0, 4, 0, 0xff9a4a, 0.35, 1.0, -2); }
   // shine + "hawg wild" wildcard = free unlimited boost; else drain the tank
   const shine = c.shineT > 0;
-  const freeB = shine || boostFree;
+  const freeB = shine || boostFree || c.killBoostT > 0;
   const canBoost = input.boost && (c.boost > 0 || freeB);
   const topM = SURF.top * topMul * (shine ? 1.25 : 1);
 

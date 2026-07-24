@@ -108,8 +108,8 @@ Object.defineProperty(global, 'navigator', { value: { getGamepads: ()=>[fakePad]
 // ---- load game ----
 const fs=require('fs');
 const src=fs.readFileSync('/tmp/game.js','utf8');
-eval(src + '\n;global.__G={startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,camLook,camAim,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,carForward,updateCamera,resetKickoff,setBallCam,carBallCollide,CAR_COLL_R,ARENA,WALL_R,BOOST_DRAIN,BALL_R,MAX_SPEED,MAX_DRIVE,SUPERSONIC,uu,FLIP_WINDOW};');
-const {startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,camLook,camAim,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,carForward,updateCamera,resetKickoff,setBallCam,carBallCollide,CAR_COLL_R,ARENA,WALL_R,BOOST_DRAIN,BALL_R,MAX_SPEED,MAX_DRIVE,SUPERSONIC,uu,FLIP_WINDOW} = global.__G;
+eval(src + '\n;global.__G={startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,camLook,camAim,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,carForward,updateCamera,resetKickoff,setBallCam,carBallCollide,CAR_COLL_R,squashCritter,makeAnimal,CRITTER_SCALE,ARENA,WALL_R,BOOST_DRAIN,BALL_R,MAX_SPEED,MAX_DRIVE,SUPERSONIC,uu,FLIP_WINDOW};');
+const {startMatch,cars,game,ball,keys,lobby,pads,camera,camPos,camLook,camAim,NET,updateCar,botInput,presentGoal,togglePause,tryJump,stickToWall,carForward,updateCamera,resetKickoff,setBallCam,carBallCollide,CAR_COLL_R,squashCritter,makeAnimal,CRITTER_SCALE,ARENA,WALL_R,BOOST_DRAIN,BALL_R,MAX_SPEED,MAX_DRIVE,SUPERSONIC,uu,FLIP_WINDOW} = global.__G;
 
 // ---- simulate ----
 function frame(){ const fn=rafQueue.shift(); if(fn) fn(); while(pendingTimeouts.length) pendingTimeouts.shift()(); }
@@ -512,6 +512,25 @@ game.player.wallAxis=null; game.player.up.set(0,1,0); game.player.pitch=0;
   }
   setBallCam(true);
   console.log('camera keeps the car on screen at the wall base, up the wall, in corners and in goal');
+}
+
+// --- roadkill bounty: flattening a critter pays 5s of free boost ---
+{
+  const t = game.player;
+  t.dead=0; t.killBoostT=0; t.boost=10; t.pos.set(0,0,0); t.vel.set(20,0,0);
+  const g = makeAnimal('goat'); g.scale.setScalar(CRITTER_SCALE); g.position.set(0.4,0,0);
+  const cr = {g,kind:'goat',dir:1,yOff:0,gait:7,phase:0,spd:0,dead:false,vx:0,vy:0,vz:0,spin:0,ttl:9};
+  squashCritter(cr, t);
+  if(!(t.killBoostT > 4.9)) throw new Error('no kill bounty awarded (killBoostT='+t.killBoostT+')');
+  if(t.boost !== 100) throw new Error('kill did not refill the tank');
+  // free boost must actually spend nothing while the bounty runs
+  const before = t.boost;
+  for(let i=0;i<30;i++) updateCar(t, 1/60, {throttle:1,steer:0,boost:true});
+  if(t.boost < before) throw new Error('kill bounty did not make boost free');
+  // ...and it must expire
+  for(let i=0;i<60*6;i++) updateCar(t, 1/60, {throttle:0,steer:0,boost:false});
+  if(t.killBoostT > 0) throw new Error('kill bounty never expired');
+  console.log('roadkill bounty OK — 5s free boost, expires');
 }
 
 // --- REPORTED: driving straight THROUGH the ball without touching it ---

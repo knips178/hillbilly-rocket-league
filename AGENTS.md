@@ -89,6 +89,18 @@ actually matter on the pitch. Measured against a 2.25-tall car and a 2.92 ball:
 Pickup radii were tuned to those giant props (jug 5.0, stew 4.5) and are now matched to the real
 footprints, so what ya can grab is what ya can see.
 
+Sizes were then raised **+50%** on user feedback (big jar 1.35, jug 2.03, roadkill 3.02 tall,
+`CRITTER_SCALE` 0.90). The roadkill drop was a CYLINDER OF STEW, which read as a circle cake sitting
+on the grass — it is now an actual flattened carcass: squashed body, splayed legs pointing skyward,
+lolling tongue. Reads instantly and is funnier.
+
+Critters carry a faint ground halo (`userData.halo`, kept flat as they waddle). Deliberately a pool
+of light UNDER them, not an emissive body — glowing the animal itself fights the arena lighting and
+reads as a rendering bug.
+
+**Roadkill bounty:** flattening a critter pays the killer `killBoostT = 5` (five seconds of free
+boost) plus a full tank. Free boost is `shine || boostFree || killBoostT > 0`.
+
 Also: jars got a proper mason-jar silhouette (body / shoulder / neck / ring lid) instead of a plain
 cylinder, the flat constant-alpha footprint disc became a soft radial gradient (a flat disc reads as
 a sticker on the grass; a gradient reads as light), and `tickPads()` gives them a slow bob and turn —
