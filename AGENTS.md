@@ -57,6 +57,22 @@ MA-rated redneck-comedy Rocket League clone, solo vs bots. One self-contained Th
   x1.9 ball power, wins car contact, lower demo bar). The pot needs its ARM delay or the killer
   auto-eats it instantly. clearRoadkill() on match start.
 
+## GORE (MA-rated) — cartoon register, not photoreal
+
+Blood and giblets on roadkill and on supersonic demolitions. Deliberately styled as a Looney Tunes
+splat: bright arterial reds (`BLOOD[]`), chunky low-poly giblets, comedic volume. That is both truer
+to the art style and funnier than anything photoreal would be at this poly count — keep it there.
+
+- `bloodSpray()` — directional spray through the existing particle pool, aimed along the hit.
+- `spawnGiblets()` — chunks that arc, tumble, land, leave a splat and fade.
+- `addSplat()` / `updateSplats()` — **pooled** ground decals (26), oldest recycled, soak in over
+  ~25s. The meshes are marked `userData._shared` so `disposeTree` skips them; they are permanent
+  scene objects, not per-kill allocations.
+- Volume scales with impact speed and critter heft (cow 1.5x, chicken 0.7x).
+- `clearGore()` runs on match start alongside `clearRoadkill()`.
+
+`CRITTER_SCALE` is 0.60 (raised from 0.42 on user feedback that the animals were too small).
+
 ## Audio synthesis — the click bug (fixed, don't reintroduce)
 
 Every synthesised sound routes through `beep()`, so its flaws were the whole game's flaws. It set

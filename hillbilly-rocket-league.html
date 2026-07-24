@@ -7818,7 +7818,7 @@ function tickMoonJug(dt){
 // behind a mess o' ROADKILL STEW — eat it for BUMPER BEEF (heavy hits + you plow through folks).
 const crossers = [];
 let crossT = 9;
-const CRITTER_SCALE = 0.42;   // animal models vs an RL-scale car
+const CRITTER_SCALE = 0.60;   // animal models vs an RL-scale car
 const ARENA_CRITTERS = [
   ['chicken','pig','goat'],      // Maw's Barn
   ['chicken','goat'],            // Frozen Pond
@@ -7873,6 +7873,119 @@ function spawnCrosser(){
   crossers.push({ g, kind, dir, yOff, gait: 6+Math.random()*3, phase: Math.random()*6.283,
     spd: uu(200)+Math.random()*uu(180), dead:false, vx:0, vy:0, vz:0, spin:0, ttl:3 });
 }
+// ================= GORE (MA-rated, cartoon register) =================
+// Bright arterial red, chunky low-poly giblets, comedic volume — it reads as a
+// Looney Tunes splat, not a wound. That's both truer to the art style and funnier
+// than anything photoreal would be at this poly count.
+const BLOOD = [0xb3122e, 0x8f0c22, 0xd41f3a, 0x6e0818];
+
+// --- ground splatter decals (pooled; oldest gets recycled) ---
+const SPLAT_POOL = 26;
+const splats = [];
+let splatIdx = -1;
+const splatTex = makeCanvasTex(64, 64, (g,w,h)=>{
+  g.clearRect(0,0,w,h);
+  const blob = (cx,cy,r)=>{ g.beginPath();
+    for(let a=0;a<Math.PI*2;a+=0.35){ const rr=r*(0.72+Math.random()*0.5);
+      const x=cx+Math.cos(a)*rr, y=cy+Math.sin(a)*rr;
+      a===0 ? g.moveTo(x,y) : g.lineTo(x,y); }
+    g.closePath(); g.fill(); };
+  g.fillStyle='#a5102a'; blob(32,32,19);                 // main pool
+  g.fillStyle='#8a0a20'; blob(30,30,12);                 // darker centre
+  for(let i=0;i<11;i++){                                  // flung droplets
+    const a=Math.random()*Math.PI*2, d=17+Math.random()*13;
+    g.fillStyle = i%2 ? '#b3122e' : '#8f0c22';
+    blob(32+Math.cos(a)*d, 32+Math.sin(a)*d, 2+Math.random()*3.5);
+  }
+});
+(function buildSplats(){
+  if(typeof THREE.CircleGeometry !== 'function') return;
+  for(let i=0;i<SPLAT_POOL;i++){
+    const m = new THREE.Mesh(new THREE.CircleGeometry(1, 12),
+      new THREE.MeshBasicMaterial({ map:splatTex, transparent:true, opacity:0,
+                                    depthWrite:false, side:THREE.DoubleSide }));
+    m.rotation.x = -Math.PI/2; m.visible = false;
+    m.userData._shared = true;                            // pooled — disposeTree must skip it
+    scene.add(m);
+    splats.push({ m, life:0, max:1 });
+  }
+})();
+function addSplat(x, z, size){
+  if(!splats.length) return;
+  const sp = splats[splatIdx = (splatIdx+1) % splats.length];
+  sp.m.position.set(x, 0.035 + Math.random()*0.01, z);    // hair above the pitch, no z-fight
+  sp.m.rotation.z = Math.random()*Math.PI*2;
+  sp.m.scale.setScalar(size);
+  sp.m.visible = true; sp.m.material.opacity = 0.92;
+  sp.life = sp.max = 22 + Math.random()*10;               // dries up slowly
+}
+function updateSplats(dt){
+  for(const sp of splats){
+    if(sp.life <= 0) continue;
+    sp.life -= dt;
+    if(sp.life <= 0){ sp.m.visible = false; continue; }
+    const t = sp.life / sp.max;
+    sp.m.material.opacity = 0.92 * Math.min(1, t*2.2);    // holds, then soaks in
+  }
+}
+
+// --- the spray itself ---
+function bloodSpray(x, y, z, dx, dz, power){
+  const n = Math.round(14 + power*16);
+  for(let i=0;i<n;i++){
+    const spread = 0.75;
+    const vx = dx*power*(0.5+Math.random()) + (Math.random()-0.5)*power*spread;
+    const vz = dz*power*(0.5+Math.random()) + (Math.random()-0.5)*power*spread;
+    spawnPart(x + (Math.random()-0.5)*0.4, y + Math.random()*0.5, z + (Math.random()-0.5)*0.4,
+      vx, 2 + Math.random()*power*0.9, vz,
+      BLOOD[(Math.random()*BLOOD.length)|0], 0.5+Math.random()*0.45,
+      uu(14) + Math.random()*uu(26));
+  }
+}
+
+// --- giblets: chunkier bits that arc, tumble and land ---
+const giblets = [];
+function spawnGiblets(x, y, z, dx, dz, power, count){
+  if(typeof THREE.BoxGeometry !== 'function') return;
+  const n = count || 5;
+  for(let i=0;i<n;i++){
+    const sz = uu(22) + Math.random()*uu(34);
+    const g = new THREE.Mesh(new THREE.BoxGeometry(sz, sz*0.7, sz*1.2),
+      new THREE.MeshLambertMaterial({ color: BLOOD[(Math.random()*BLOOD.length)|0] }));
+    g.position.set(x + (Math.random()-0.5)*0.5, y, z + (Math.random()-0.5)*0.5);
+    g.rotation.set(Math.random()*3, Math.random()*3, Math.random()*3);
+    scene.add(g);
+    giblets.push({ g,
+      vx: dx*power*(0.4+Math.random()*0.8) + (Math.random()-0.5)*power,
+      vy: 3 + Math.random()*power*0.8,
+      vz: dz*power*(0.4+Math.random()*0.8) + (Math.random()-0.5)*power,
+      spin:(Math.random()-0.5)*16, life: 3.5 + Math.random()*2, landed:false });
+  }
+}
+function updateGiblets(dt){
+  for(let i=giblets.length-1;i>=0;i--){
+    const gb = giblets[i];
+    gb.life -= dt;
+    if(gb.life <= 0){ scene.remove(gb.g); disposeTree(gb.g); giblets.splice(i,1); continue; }
+    if(!gb.landed){
+      gb.vy += GRAV_CAR*dt;
+      gb.g.position.x += gb.vx*dt; gb.g.position.y += gb.vy*dt; gb.g.position.z += gb.vz*dt;
+      gb.g.rotation.x += gb.spin*dt; gb.g.rotation.z += gb.spin*0.7*dt;
+      if(gb.g.position.y <= uu(20)){                       // splat down and stay put
+        gb.g.position.y = uu(20); gb.landed = true;
+        addSplat(gb.g.position.x, gb.g.position.z, 0.35 + Math.random()*0.3);
+      }
+    }
+    const f = Math.min(1, gb.life/1.2);                    // fade out at the end
+    if(gb.g.material) gb.g.material.opacity = f, gb.g.material.transparent = f < 1;
+  }
+}
+function clearGore(){
+  for(const gb of giblets){ scene.remove(gb.g); disposeTree(gb.g); }
+  giblets.length = 0;
+  for(const sp of splats){ sp.life = 0; sp.m.visible = false; }
+}
+
 function squashCritter(cr, byCar){
   cr.dead = true; cr.ttl = 2.6;
   const away = new THREE.Vector3(cr.g.position.x - byCar.pos.x, 0, cr.g.position.z - byCar.pos.z);
@@ -7885,10 +7998,18 @@ function squashCritter(cr, byCar){
   cr.spin = (Math.random()<0.5?-1:1) * (7 + Math.random()*7);
   critterYelp(cr.kind);
   thump(0.7);
-  // feathers n' fur
+  // feathers n' fur...
   for(let i=0;i<16;i++) spawnPart(cr.g.position.x, 1.2, cr.g.position.z,
     (Math.random()-0.5)*13, 3+Math.random()*9, (Math.random()-0.5)*13,
-    Math.random()<0.5 ? 0xf0ead8 : 0xb08a5a, 0.4+Math.random()*0.3, 0.7);
+    Math.random()<0.5 ? 0xf0ead8 : 0xb08a5a, 0.4+Math.random()*0.3, 0.7*CRITTER_SCALE);
+  // ...and the red stuff. Bigger critters make a bigger mess, and a faster hit
+  // throws it further — the spray follows the direction ya clobbered it from.
+  const gorePow = 3.5 + Math.min(11, Math.hypot(byCar.vel.x, byCar.vel.z)) * 0.55;
+  const heft = (cr.kind === 'cow' ? 1.5 : cr.kind === 'chicken' ? 0.7 : 1);
+  bloodSpray(cr.g.position.x, 0.6, cr.g.position.z, away.x, away.z, gorePow*heft);
+  spawnGiblets(cr.g.position.x, 0.7, cr.g.position.z, away.x, away.z, gorePow*0.8,
+               Math.round(4*heft) + 2);
+  addSplat(cr.g.position.x, cr.g.position.z, (0.75 + Math.random()*0.5) * heft);
   dropRoadkill(cr.g.position.x, cr.g.position.z);
   crowdHype = Math.max(crowdHype, 0.55);
   if(byCar.isPlayer){ rumble(220, 0.8, 0.5); announce(pick(ROADKILL_LINES), 2.0); }
@@ -8896,6 +9017,16 @@ function demolish(victim, culprit){
   camShake = Math.max(camShake, 0.7); crowdHype = Math.max(crowdHype, 0.6);
   if(victim.isPlayer || culprit.isPlayer) rumble(500, 1, 0.8);
   announceVO('demo', 2.6, { A: culprit.name.toUpperCase(), B: victim.name.toUpperCase() });
+  // MA-rated: a rig going supersonic through another one leaves more than sparks.
+  {
+    const d = new THREE.Vector3(victim.pos.x - (culprit?culprit.pos.x:victim.pos.x-1), 0,
+                                victim.pos.z - (culprit?culprit.pos.z:victim.pos.z));
+    if(d.lengthSq() < 0.01) d.set(1,0,0);
+    d.normalize();
+    bloodSpray(victim.pos.x, 0.8, victim.pos.z, d.x, d.z, 12);
+    spawnGiblets(victim.pos.x, 0.9, victim.pos.z, d.x, d.z, 9, 8);
+    addSplat(victim.pos.x, victim.pos.z, 1.1 + Math.random()*0.6);
+  }
 }
 function boom(){
   const ac = audio(); if(!ac) return;
@@ -9858,6 +9989,7 @@ function startMatch(rematch){
   clearWild();
   moonJugT = 14; if(moonJug){ moonJug.visible = false; moonJug.userData.active = false; }
   clearRoadkill();
+  clearGore();
   HUD.sb.textContent='0'; HUD.sr.textContent='0';
   HUD.chat.innerHTML='';
   for(const p of pads){ p.timer=0; p.mesh.visible=true; }
@@ -10449,6 +10581,8 @@ function animate(){
         tickMoonJug(dt);
         updateCrossers(dt);
         tickRoadkills(dt);
+        updateGiblets(dt);
+        updateSplats(dt);
       }
       NET.sendSnapshot();
     }
