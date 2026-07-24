@@ -57,6 +57,20 @@ MA-rated redneck-comedy Rocket League clone, solo vs bots. One self-contained Th
   x1.9 ball power, wins car contact, lower demo bar). The pot needs its ARM delay or the killer
   auto-eats it instantly. clearRoadkill() on match start.
 
+## Audio synthesis — the click bug (fixed, don't reintroduce)
+
+Every synthesised sound routes through `beep()`, so its flaws were the whole game's flaws. It set
+`gain.value = vol` directly, which CLICKS on the leading edge of every sound — that pop was most of
+what made the audio feel cheap. It now ramps in over ~10ms and runs through a lowpass so raw
+square/sawtooth isn't piercing. Same signature, so every call site benefits.
+
+`beep()` takes an optional `warble` (pitch vibrato via an LFO on `frequency`) and there's a small
+`noiseBurst()` for a breath/rasp layer. Those two together are what make `critterYelp` read as an
+animal instead of an arcade blip — pitch alone never did.
+
+Real recorded audio (19 clips: Kenney CC0 announcer + Wikimedia SFX, ~205 KB base64) stays as-is;
+attribution in the lobby credits line is REQUIRED — keep it.
+
 ## Multiplayer: CONFIRMED WORKING end-to-end (2026-07-22)
 
 Mac hosting + iPhone on **cell data** connected and played a full match. The path is
