@@ -6759,7 +6759,7 @@ const pads = [];
 // boost pads are jars of moonshine ("SHINE") — big pad = full jar, small = half-pint
 function addPad(x, z, big){
   const grp = new THREE.Group(); grp.position.set(x,0,z);
-  const s = (big ? 1.0 : 0.62) * 0.5;   // pads scale with the smaller cars
+  const s = (big ? 1.0 : 0.62) * 0.85;  // readable at gameplay distance without dwarfing the ball
   const glass  = new THREE.MeshLambertMaterial({ color:0xdfe6cf, transparent:true, opacity:0.4 });
   const shine  = new THREE.MeshLambertMaterial({ color:0xf0b24a, emissive: big?0xc07a10:0x8a560c });
   const lid    = new THREE.MeshLambertMaterial({ color:0xc2c8ce, emissive:0x2e353a });
@@ -6769,7 +6769,8 @@ function addPad(x, z, big){
   const cap    = new THREE.Mesh(new THREE.CylinderGeometry(1.55*s,1.55*s,0.4*s,14), lid);    cap.position.y=2.15*s;  grp.add(cap);
   const tag    = new THREE.Mesh(new THREE.BoxGeometry(1.6*s,0.9*s,0.05), label);             tag.position.set(0,0.95*s,1.32*s); grp.add(tag);
   // glow ring on the ground so ya can still read the pad
-  const ring = new THREE.Mesh(new THREE.CircleGeometry(big?4.2:2.8, 20),
+  // match RL's actual pad radii (208 / 144 uu) instead of the old-scale 4.2/2.8
+  const ring = new THREE.Mesh(new THREE.CircleGeometry(big?uu(208):uu(144), 20),
     new THREE.MeshBasicMaterial({ color: big?0xffb347:0xdd8833, transparent:true, opacity:0.28, depthWrite:false }));
   ring.rotation.x=-Math.PI/2; ring.position.y=0.05; grp.add(ring);
   scene.add(grp);
@@ -7398,7 +7399,8 @@ function makeCar(name, team, vehIdx, isPlayer){
   const mesh = buildVehicleMesh(v.id, TEAM_COLOR[team]);
   mesh.scale.setScalar(v.scale * CAR_SCALE);
   // team underglow
-  const glow = new THREE.Mesh(new THREE.CircleGeometry(4.4, 20),
+  // radius follows the car, not the old fixed 4.4 (which drew a disc twice the vehicle's width)
+  const glow = new THREE.Mesh(new THREE.CircleGeometry(2.1, 20),
     new THREE.MeshBasicMaterial({ color: team===0?0x3388ff:0xff5533, transparent:true, opacity:0.35, depthWrite:false }));
   glow.rotation.x = -Math.PI/2; glow.position.y = 0.12;
   mesh.add(glow);
@@ -7751,6 +7753,7 @@ function tickMoonJug(dt){
 // behind a mess o' ROADKILL STEW — eat it for BUMPER BEEF (heavy hits + you plow through folks).
 const crossers = [];
 let crossT = 9;
+const CRITTER_SCALE = 0.42;   // animal models vs an RL-scale car
 const ARENA_CRITTERS = [
   ['chicken','pig','goat'],      // Maw's Barn
   ['chicken','goat'],            // Frozen Pond
@@ -7769,12 +7772,17 @@ function spawnCrosser(){
   const kinds = ARENA_CRITTERS[lobby.arena] || ARENA_CRITTERS[0];
   const kind = pick(kinds);
   const g = (kind==='duck') ? buildDuck() : makeAnimal(kind);
+  // Critter models were built when a car was ~3.5x bigger: a cow came out longer than
+  // the whole vehicle and a chicken stood as tall as it. Bring 'em back to a believable
+  // size against an RL-scale car (still a touch oversized — it's funnier, and ya need
+  // to see what yer about to flatten).
+  g.scale.setScalar(CRITTER_SCALE);
   // the duck model is built for FLIGHT (body on the group origin, wings splayed) — on the deck it
   // sat half-buried lookin' like roadkill already. Lift it onto its feet and tuck the wings in.
   let yOff = 0;
   if(kind==='duck'){
-    g.scale.setScalar(1.5);
-    yOff = 0.95;
+    g.scale.setScalar(1.5*CRITTER_SCALE);
+    yOff = 0.95*CRITTER_SCALE;
     const wL = g.userData.wL, wR = g.userData.wR;
     if(wL) wL.rotation.z = -0.5;
     if(wR) wR.rotation.z = 0.5;
@@ -7786,7 +7794,7 @@ function spawnCrosser(){
   g.rotation.y = (kind==='duck') ? (dir>0?Math.PI/2:-Math.PI/2) : (dir>0?0:Math.PI);
   scene.add(g);
   g.position.y = yOff;
-  crossers.push({ g, kind, dir, yOff, spd: 7+Math.random()*6, dead:false, vx:0, vy:0, vz:0, spin:0, ttl:3 });
+  crossers.push({ g, kind, dir, yOff, spd: uu(200)+Math.random()*uu(180), dead:false, vx:0, vy:0, vz:0, spin:0, ttl:3 });
 }
 function squashCritter(cr, byCar){
   cr.dead = true; cr.ttl = 2.6;
