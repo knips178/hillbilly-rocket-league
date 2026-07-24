@@ -154,6 +154,14 @@ strip it with `-vn`). Re-encoded to **48 kbps mono AAC = 2.4 MB base64**, taking
 fidelity, and page weight is the thing that makes this joinable from a phone on cell data.
 If it ever needs to shrink, 40 kbps saves another ~0.4 MB.
 
+**The lobby loops the first 3 seconds** (`window.MENU_B64`). Encoded as its OWN 34 KB clip rather
+than seeking the 5-minute file: an `<audio>` element has no loop-region support, so looping a slice
+means watching `currentTime` and resetting it, which is audibly jittery. A dedicated clip just sets
+`loop = true` and wraps seamlessly, with a 60 ms fade on the tail so the join doesn't click. The
+synthesised porch licks remain as a fallback when the payload is absent (stripped build, harness),
+so the lobby is never silent. Menu and match music can never both play — `musicPlay()` stops the
+menu loop first.
+
 Played through an `<audio>` element, NOT a decoded AudioBuffer — the track is 5 minutes and would
 sit ~50 MB in memory as a buffer for no benefit. Routed through `masterGain` via
 `createMediaElementSource` so **M** mutes it with everything else, with a fallback to the element's
