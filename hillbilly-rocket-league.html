@@ -6827,22 +6827,72 @@ const ball = { pos:new THREE.Vector3(0,BALL_R,0), vel:new THREE.Vector3(), spin:
 // ---------------- BOOST PADS ----------------
 const pads = [];
 // boost pads are jars of moonshine ("SHINE") — big pad = full jar, small = half-pint
+// Soft radial glow for the pad footprint — a flat constant-alpha disc read as a
+// sticker on the grass; a gradient reads as light.
+const padGlowTex = makeCanvasTex(64, 64, (g,w,h)=>{
+  const grd = g.createRadialGradient(32,32,2, 32,32,32);
+  grd.addColorStop(0,   'rgba(255,214,140,0.85)');
+  grd.addColorStop(0.45,'rgba(255,170,60,0.38)');
+  grd.addColorStop(0.8, 'rgba(210,120,30,0.12)');
+  grd.addColorStop(1,   'rgba(180,100,20,0)');
+  g.fillStyle=grd; g.fillRect(0,0,w,h);
+});
+
+// Pickups gently rise, sink and turn. Static props read as scenery; a slow bob is
+// the cheapest possible signal that something is COLLECTIBLE.
+function tickPads(dt){
+  const t = performance.now()/1000;
+  for(const p of pads){
+    const g = p.mesh; if(!g || !g.visible) continue;
+    const ph = g.userData.bobT || 0;
+    g.position.y = Math.sin(t*1.6 + ph) * uu(9);
+    g.rotation.y = t*0.55 + ph;
+    const r = g.userData.ring;
+    if(r){
+      r.rotation.z = -g.rotation.y;                        // keep the glow world-steady
+      r.position.y = 0.04 - g.position.y;                  // ...and flat on the grass
+      r.material.opacity = 0.42 + Math.sin(t*2.1 + ph)*0.13;
+    }
+  }
+}
+
 function addPad(x, z, big){
   const grp = new THREE.Group(); grp.position.set(x,0,z);
-  const s = (big ? 1.0 : 0.62) * 0.85;  // readable at gameplay distance without dwarfing the ball
-  const glass  = new THREE.MeshLambertMaterial({ color:0xdfe6cf, transparent:true, opacity:0.4 });
-  const shine  = new THREE.MeshLambertMaterial({ color:0xf0b24a, emissive: big?0xc07a10:0x8a560c });
-  const lid    = new THREE.MeshLambertMaterial({ color:0xc2c8ce, emissive:0x2e353a });
-  const label  = new THREE.MeshLambertMaterial({ color:0xece2c4 });
-  const jar    = new THREE.Mesh(new THREE.CylinderGeometry(1.5*s,1.4*s,2.0*s,14), glass);   jar.position.y=1.0*s;   grp.add(jar);
-  const liquid = new THREE.Mesh(new THREE.CylinderGeometry(1.32*s,1.28*s,1.35*s,14), shine); liquid.position.y=0.78*s; grp.add(liquid);
-  const cap    = new THREE.Mesh(new THREE.CylinderGeometry(1.55*s,1.55*s,0.4*s,14), lid);    cap.position.y=2.15*s;  grp.add(cap);
-  const tag    = new THREE.Mesh(new THREE.BoxGeometry(1.6*s,0.9*s,0.05), label);             tag.position.set(0,0.95*s,1.32*s); grp.add(tag);
-  // glow ring on the ground so ya can still read the pad
-  // match RL's actual pad radii (208 / 144 uu) instead of the old-scale 4.2/2.8
-  const ring = new THREE.Mesh(new THREE.CircleGeometry(big?uu(208):uu(144), 20),
-    new THREE.MeshBasicMaterial({ color: big?0xffb347:0xdd8833, transparent:true, opacity:0.28, depthWrite:false }));
-  ring.rotation.x=-Math.PI/2; ring.position.y=0.05; grp.add(ring);
+  // Was 2.0 units tall and 2.55 wide — nearly as tall as the CAR and wider than
+  // the ball, which is why the floor pickups looked oversized and cluttered. A
+  // pickup should read at a glance without competing with the two things that
+  // actually matter on the pitch.
+  const s = (big ? 0.30 : 0.22);
+  const glass = new THREE.MeshLambertMaterial({ color:0xdfe6cf, transparent:true, opacity:0.42 });
+  const shine = new THREE.MeshLambertMaterial({ color:0xf0b24a, emissive: big?0xa8660c:0x7a4a08 });
+  const lid   = new THREE.MeshLambertMaterial({ color:0xb9c0c7, emissive:0x22282c });
+  const band  = new THREE.MeshLambertMaterial({ color:0xece2c4 });
+
+  // proper mason-jar silhouette: body, shoulder, neck, ring lid
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(1.5*s,1.42*s,2.0*s,14), glass);
+  body.position.y = 1.0*s; grp.add(body);
+  const liquid = new THREE.Mesh(new THREE.CylinderGeometry(1.34*s,1.3*s,1.4*s,14), shine);
+  liquid.position.y = 0.76*s; grp.add(liquid);
+  const shoulder = new THREE.Mesh(new THREE.CylinderGeometry(1.05*s,1.5*s,0.45*s,14), glass);
+  shoulder.position.y = 2.2*s; grp.add(shoulder);
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(1.0*s,1.0*s,0.3*s,12), glass);
+  neck.position.y = 2.55*s; grp.add(neck);
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(1.12*s,1.12*s,0.34*s,12), lid);
+  cap.position.y = 2.82*s; grp.add(cap);
+  const hoop = new THREE.Mesh(new THREE.CylinderGeometry(1.16*s,1.16*s,0.14*s,12), band);
+  hoop.position.y = 2.62*s; grp.add(hoop);
+  if(big){                                        // big jars wear a paper label
+    const tag = new THREE.Mesh(new THREE.BoxGeometry(1.7*s,0.85*s,0.06*s), band);
+    tag.position.set(0, 1.0*s, 1.36*s); grp.add(tag);
+  }
+  // the pickup lives on a soft glow so it stays readable at speed
+  const ring = new THREE.Mesh(new THREE.PlaneGeometry(big?uu(300):uu(210), big?uu(300):uu(210)),
+    new THREE.MeshBasicMaterial({ map:padGlowTex, transparent:true, opacity:0.55,
+                                  depthWrite:false, color: big?0xffc46a:0xdd9944 }));
+  ring.rotation.x=-Math.PI/2; ring.position.y=0.04; grp.add(ring);
+  grp.userData.jar = body.parent;                 // whole jar bobs; ring stays put
+  grp.userData.ring = ring;
+  grp.userData.bobT = Math.random()*6.283;
   scene.add(grp);
   pads.push({ x, z, big, mesh:grp, timer:0, r: big?uu(208):uu(144) });
 }
@@ -7772,6 +7822,10 @@ function tickWildcard(dt){
 let moonJug = null, moonJugT = 12;
 function buildMoonJug(){
   const g = new THREE.Group();
+  // Built at ~4.65 units tall — twice the height of the car. Scaled as a group so
+  // the design is untouched and only the footprint changes. Still the biggest
+  // pickup on the pitch, which is right: it's the rare one.
+  g.scale.setScalar(0.26);
   const body = new THREE.Mesh(new THREE.CylinderGeometry(1.5,1.7,3.4,12),
     new THREE.MeshLambertMaterial({ color:0xcfe0c0, emissive:0x2a4a10, transparent:true, opacity:0.92 }));
   body.position.y = 2.0; g.add(body);
@@ -7805,7 +7859,7 @@ function tickMoonJug(dt){
   for(const c of cars){
     if(c.dead > 0) continue;
     const dx = c.pos.x - moonJug.position.x, dz = c.pos.z - moonJug.position.z;
-    if(dx*dx + dz*dz < 25){
+    if(dx*dx + dz*dz < 4.2){        // matches the jug's real footprint now
       c.shineT = 6; c.boost = 100;
       moonJug.userData.active = false; moonJug.visible = false;
       moonJugT = 20 + Math.random()*12;
@@ -8154,9 +8208,10 @@ const roadkills = [];
 const STEW_TIME = 8, STEW_POW = 1.9;
 function dropRoadkill(x, z){
   const g = new THREE.Group();
-  const splat = new THREE.Mesh(new THREE.CylinderGeometry(2.1, 2.4, 0.35, 10),
-    new THREE.MeshLambertMaterial({ color:0x7a2b22 }));
-  splat.position.y = 0.18; g.add(splat);
+  // The old brown "splat" disc under the pot is redundant now that real blood
+  // splats land here, and it read as a mud puddle. Pot only, scaled down from a
+  // 2-unit prop to something that sits on the grass instead of squatting on it.
+  g.scale.setScalar(0.42);
   const pot = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.35, 1.5, 10),
     new THREE.MeshLambertMaterial({ color:0x3a3a38 }));
   pot.position.y = 1.05; g.add(pot);
@@ -8189,7 +8244,7 @@ function tickRoadkills(dt){
     for(const c of cars){
       if(c.dead > 0) continue;
       const dx = c.pos.x - rk.g.position.x, dz = c.pos.z - rk.g.position.z;
-      if(dx*dx + dz*dz < 20){
+      if(dx*dx + dz*dz < 3.4){      // matches the pot's real footprint now
         c.stewT = STEW_TIME;
         burst(rk.g.position.clone().setY(1.6), 0xff9a4a, 26, 15);
         scene.remove(rk.g); disposeTree(rk.g); roadkills.splice(i,1);
@@ -10704,7 +10759,8 @@ function animate(){
         updateBall(dt);
         for(const c of cars) carBallCollide(c, dt);
         for(let i=0;i<cars.length;i++) for(let j=i+1;j<cars.length;j++) carCarCollide(cars[i],cars[j]);
-        tickWildcard(dt);
+        tickPads(dt);
+      tickWildcard(dt);
         tickMoonJug(dt);
         updateCrossers(dt);
         tickRoadkills(dt);

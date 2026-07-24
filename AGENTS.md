@@ -74,6 +74,27 @@ MA-rated redneck-comedy Rocket League clone, solo vs bots. One self-contained Th
 Contact height follows `c.up`, so it stays on the bodywork while wall-riding.
 Harness: sweeps 48 combinations of offset x speed x framerate; every one must register a touch.
 
+## Floor pickups — sized against the car, not left at model scale
+
+All the ground props were built before the RL rescale and were competing with the two things that
+actually matter on the pitch. Measured against a 2.25-tall car and a 2.92 ball:
+
+| | was | now |
+|---|---|---|
+| big boost jar | 2.0 tall, 2.55 wide | **0.90** |
+| small boost jar | ~1.3 | **0.66** |
+| moonshine jug | **4.65** (twice the car!) | **1.35** |
+| roadkill stew | ~2.0 + a fake brown splat disc | **0.63** (disc dropped) |
+
+Pickup radii were tuned to those giant props (jug 5.0, stew 4.5) and are now matched to the real
+footprints, so what ya can grab is what ya can see.
+
+Also: jars got a proper mason-jar silhouette (body / shoulder / neck / ring lid) instead of a plain
+cylinder, the flat constant-alpha footprint disc became a soft radial gradient (a flat disc reads as
+a sticker on the grass; a gradient reads as light), and `tickPads()` gives them a slow bob and turn —
+static props read as scenery, and a bob is the cheapest possible signal that something is COLLECTIBLE.
+The stew's brown splat disc is gone: real blood splats land there now and it read as a mud puddle.
+
 ## GORE (MA-rated) — cartoon register, not photoreal
 
 Blood and giblets on roadkill and on supersonic demolitions. Deliberately styled as a Looney Tunes
