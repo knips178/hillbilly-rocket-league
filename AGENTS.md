@@ -142,6 +142,24 @@ to the art style and funnier than anything photoreal would be at this poly count
 
 `CRITTER_SCALE` is 0.60 (raised from 0.42 on user feedback that the animals were too small).
 
+## Match music
+
+`window.MUSIC_B64` — the user's own banjo track, played on repeat for the whole match.
+**They wrote it themselves**, so there is no third-party rights question; do not swap it for
+anything sourced elsewhere without asking, since the game is published publicly.
+
+Source was 7.5 MB / 197 kbps stereo with embedded album art (the art breaks an m4a container —
+strip it with `-vn`). Re-encoded to **48 kbps mono AAC = 2.4 MB base64**, taking the game from
+2.1 MB to 4.5 MB. That trade was made deliberately: background banjo under SFX does not need
+fidelity, and page weight is the thing that makes this joinable from a phone on cell data.
+If it ever needs to shrink, 40 kbps saves another ~0.4 MB.
+
+Played through an `<audio>` element, NOT a decoded AudioBuffer — the track is 5 minutes and would
+sit ~50 MB in memory as a buffer for no benefit. Routed through `masterGain` via
+`createMediaElementSource` so **M** mutes it with everything else, with a fallback to the element's
+own volume if that API is unavailable. **B** toggles music alone. Starts on kickoff, stops at
+match end and when leaving to the lobby.
+
 ## Audio synthesis — the click bug (fixed, don't reintroduce)
 
 Every synthesised sound routes through `beep()`, so its flaws were the whole game's flaws. It set
