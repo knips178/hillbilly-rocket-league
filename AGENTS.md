@@ -154,10 +154,12 @@ strip it with `-vn`). Re-encoded to **48 kbps mono AAC = 2.4 MB base64**, taking
 fidelity, and page weight is the thing that makes this joinable from a phone on cell data.
 If it ever needs to shrink, 40 kbps saves another ~0.4 MB.
 
-**The lobby loops the first 3 seconds** (`window.MENU_B64`). Encoded as its OWN 34 KB clip rather
+**The lobby loops the first 4 seconds** (`window.MENU_B64`). Encoded as its OWN 45 KB clip rather
 than seeking the 5-minute file: an `<audio>` element has no loop-region support, so looping a slice
 means watching `currentTime` and resetting it, which is audibly jittery. A dedicated clip just sets
-`loop = true` and wraps seamlessly, with a 60 ms fade on the tail so the join doesn't click. The
+`loop = true` and wraps seamlessly, with a 60 ms fade on the tail so the join doesn't click.
+To change the length, re-run the ffmpeg slice (`-t <seconds>`, fade at length-0.06) and swap the
+payload — nothing in the playback code needs touching. The
 synthesised porch licks remain as a fallback when the payload is absent (stripped build, harness),
 so the lobby is never silent. Menu and match music can never both play — `musicPlay()` stops the
 menu loop first.
