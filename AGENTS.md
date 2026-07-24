@@ -63,7 +63,13 @@ Blood and giblets on roadkill and on supersonic demolitions. Deliberately styled
 splat: bright arterial reds (`BLOOD[]`), chunky low-poly giblets, comedic volume. That is both truer
 to the art style and funnier than anything photoreal would be at this poly count — keep it there.
 
-- `bloodSpray()` — directional spray through the existing particle pool, aimed along the hit.
+- `bloodGeyser()` — the main event. A single burst looked stingy, so this registers an emitter that
+  PUMPS over ~0.7s with a hard vertical component, fountaining overhead before raining back down.
+  Deliberately over the top — that's the joke. `bloodSpray()` is the small one-shot lick.
+- **Gettin' wasted is the money shot.** `demolish()` fires the biggest geyser in the game, scaled
+  2.4x when the victim is the player (the camera is parked right on it) vs 1.8x for a bot, plus 16
+  giblets and a camera shake. Measured on a player demo: 127 particles in the opening burst, 16
+  giblets, 11 splat pools.
 - `spawnGiblets()` — chunks that arc, tumble, land, leave a splat and fade.
 - `addSplat()` / `updateSplats()` — **pooled** ground decals (26), oldest recycled, soak in over
   ~25s. The meshes are marked `userData._shared` so `disposeTree` skips them; they are permanent

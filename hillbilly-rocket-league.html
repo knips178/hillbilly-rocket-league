@@ -7929,17 +7929,48 @@ function updateSplats(dt){
   }
 }
 
-// --- the spray itself ---
-function bloodSpray(x, y, z, dx, dz, power){
-  const n = Math.round(14 + power*16);
+// --- the spray: a comically large GEYSER, not a puff ---
+// Single-burst looked stingy. A gag this size needs to ERUPT — so an emitter is
+// registered and pumps over ~0.7s, with a hard vertical component that fountains
+// well overhead before raining back down. Deliberately over the top; that's the joke.
+const geysers = [];
+function bloodSpray(x, y, z, dx, dz, power){    // one-shot lick of spray (small hits)
+  emitBlood(x, y, z, dx, dz, power, Math.round(16 + power*10));
+}
+function emitBlood(x, y, z, dx, dz, power, n){
   for(let i=0;i<n;i++){
-    const spread = 0.75;
-    const vx = dx*power*(0.5+Math.random()) + (Math.random()-0.5)*power*spread;
-    const vz = dz*power*(0.5+Math.random()) + (Math.random()-0.5)*power*spread;
-    spawnPart(x + (Math.random()-0.5)*0.4, y + Math.random()*0.5, z + (Math.random()-0.5)*0.4,
-      vx, 2 + Math.random()*power*0.9, vz,
-      BLOOD[(Math.random()*BLOOD.length)|0], 0.5+Math.random()*0.45,
-      uu(14) + Math.random()*uu(26));
+    const spread = 1.15;
+    const vx = dx*power*(0.35+Math.random()*0.9) + (Math.random()-0.5)*power*spread;
+    const vz = dz*power*(0.35+Math.random()*0.9) + (Math.random()-0.5)*power*spread;
+    const up = power*(0.75 + Math.random()*1.35);          // the fountain
+    spawnPart(x + (Math.random()-0.5)*0.6, y + Math.random()*0.7, z + (Math.random()-0.5)*0.6,
+      vx, up, vz,
+      BLOOD[(Math.random()*BLOOD.length)|0], 0.75+Math.random()*0.75,
+      uu(26) + Math.random()*uu(60));                      // fat globs
+  }
+}
+// power ~ how hard it blows, scale ~ how big the whole gag is
+function bloodGeyser(x, y, z, dx, dz, power, scale){
+  const sc = scale || 1;
+  geysers.push({ x, y, z, dx, dz, power, sc, t: 0, life: 0.72, next: 0 });
+  emitBlood(x, y, z, dx, dz, power*1.25, Math.round(34*sc));   // opening burst
+  for(let i=0;i<Math.round(4*sc);i++){                          // ring of pooling
+    const a = Math.random()*Math.PI*2, d = (0.6+Math.random()*1.6)*sc;
+    addSplat(x + Math.cos(a)*d, z + Math.sin(a)*d, (0.5+Math.random()*0.7)*sc);
+  }
+  addSplat(x, z, (1.5 + Math.random()*0.8)*sc);
+}
+function updateGeysers(dt){
+  for(let i=geysers.length-1;i>=0;i--){
+    const gy = geysers[i];
+    gy.t += dt; gy.life -= dt;
+    if(gy.life <= 0){ geysers.splice(i,1); continue; }
+    gy.next -= dt;
+    if(gy.next <= 0){
+      gy.next = 0.055;
+      const fade = Math.max(0.25, gy.life/0.72);          // pumps hard, then tails off
+      emitBlood(gy.x, gy.y, gy.z, gy.dx, gy.dz, gy.power*fade, Math.round(14*gy.sc*fade));
+    }
   }
 }
 
@@ -7981,6 +8012,7 @@ function updateGiblets(dt){
   }
 }
 function clearGore(){
+  geysers.length = 0;
   for(const gb of giblets){ scene.remove(gb.g); disposeTree(gb.g); }
   giblets.length = 0;
   for(const sp of splats){ sp.life = 0; sp.m.visible = false; }
@@ -8006,10 +8038,9 @@ function squashCritter(cr, byCar){
   // throws it further — the spray follows the direction ya clobbered it from.
   const gorePow = 3.5 + Math.min(11, Math.hypot(byCar.vel.x, byCar.vel.z)) * 0.55;
   const heft = (cr.kind === 'cow' ? 1.5 : cr.kind === 'chicken' ? 0.7 : 1);
-  bloodSpray(cr.g.position.x, 0.6, cr.g.position.z, away.x, away.z, gorePow*heft);
+  bloodGeyser(cr.g.position.x, 0.6, cr.g.position.z, away.x, away.z, gorePow*heft, 1.15*heft);
   spawnGiblets(cr.g.position.x, 0.7, cr.g.position.z, away.x, away.z, gorePow*0.8,
-               Math.round(4*heft) + 2);
-  addSplat(cr.g.position.x, cr.g.position.z, (0.75 + Math.random()*0.5) * heft);
+               Math.round(7*heft) + 3);
   dropRoadkill(cr.g.position.x, cr.g.position.z);
   crowdHype = Math.max(crowdHype, 0.55);
   if(byCar.isPlayer){ rumble(220, 0.8, 0.5); announce(pick(ROADKILL_LINES), 2.0); }
@@ -9023,9 +9054,12 @@ function demolish(victim, culprit){
                                 victim.pos.z - (culprit?culprit.pos.z:victim.pos.z));
     if(d.lengthSq() < 0.01) d.set(1,0,0);
     d.normalize();
-    bloodSpray(victim.pos.x, 0.8, victim.pos.z, d.x, d.z, 12);
-    spawnGiblets(victim.pos.x, 0.9, victim.pos.z, d.x, d.z, 9, 8);
-    addSplat(victim.pos.x, victim.pos.z, 1.1 + Math.random()*0.6);
+    // Somebody gettin' WASTED is the money shot — and when it's you, the camera is
+    // parked right on it. Biggest gag in the game, so it gets the biggest geyser.
+    const big = victim.isPlayer ? 2.4 : 1.8;
+    bloodGeyser(victim.pos.x, 0.9, victim.pos.z, d.x, d.z, 16, big);
+    spawnGiblets(victim.pos.x, 1.0, victim.pos.z, d.x, d.z, 12, victim.isPlayer ? 16 : 11);
+    if(victim.isPlayer) camShake = Math.max(camShake, 1.1);
   }
 }
 function boom(){
@@ -10582,6 +10616,7 @@ function animate(){
         updateCrossers(dt);
         tickRoadkills(dt);
         updateGiblets(dt);
+        updateGeysers(dt);
         updateSplats(dt);
       }
       NET.sendSnapshot();
