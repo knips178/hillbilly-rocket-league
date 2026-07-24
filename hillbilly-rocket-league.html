@@ -10083,6 +10083,7 @@ function camBoom(p){
 const camPos = new THREE.Vector3(0,40,90);
 const camLook = new THREE.Vector3(0,0,0);
 const camAim  = new THREE.Vector3(0,0,0);   // the final look point actually rendered
+let camFit = 0;                            // smoothed boom length — never stepped
 function updateCamera(dt){
   const p = game.player; if(!p) return;
   let want, lookTarget;
@@ -10131,22 +10132,33 @@ function updateCamera(dt){
   off.addScaledVector(camUp, CAM_HEIGHT);
   const oLen = Math.max(1e-4, off.length());
   const oDir = off.multiplyScalar(1/oLen);
-  const fit = fitBoom(p.pos, oDir, oLen, inGoalNow);
-  want = p.pos.clone().addScaledVector(oDir, fit);
-  // arm badly shortened (deep corner, goal mouth)? lean the gaze onto the car so
-  // ya can still read which way yer pointed
-  const squeeze = 1 - fit/oLen;
-  if(squeeze > 0.15) lookTarget.lerp(p.pos, Math.min(0.8, squeeze));
+  // ---- NO DISCONTINUITIES PAST THIS POINT ----
+  // Three separate things used to make the camera snap, and near the boards (i.e.
+  // most of the time on an RL-sized pitch) they fired constantly — that's the
+  // "camera keeps readjusting / screen shaking":
+  //   1. the gaze lean was gated on `squeeze > 0.15`, so crossing that threshold
+  //      JUMPED the aim up to 80% onto the car,
+  //   2. the smoothing RATES were ramped by how starved the shot was, so the camera
+  //      kept flipping between gentle easing and a hard snap,
+  //   3. the boom length was used raw, so any step in the wall/goal limit stepped
+  //      the camera position with it.
+  // Now: the boom is itself smoothed, the lean is continuous, and the rates are
+  // constant. Everything the camera does is a damped ease with no thresholds.
+  const fitRaw = fitBoom(p.pos, oDir, oLen, inGoalNow);
+  if(camFit <= 0) camFit = fitRaw;                        // first frame
+  camFit += (fitRaw - camFit) * (1 - Math.exp(-9 * dt));  // ease the arm, never step it
+  want = p.pos.clone().addScaledVector(oDir, camFit);
+
+  // arm shortened (deep corner, goal mouth)? lean the gaze onto the car — smoothly,
+  // proportional to how starved it is, with no threshold to cross.
+  const squeeze = THREE.MathUtils.clamp(1 - camFit/oLen, 0, 1);
+  if(squeeze > 0) lookTarget.lerp(p.pos, squeeze * 0.7);
 
   const inGoal = inGoalNow;
-  const lost = Math.max(0, oLen - fit);
-  // Stiffness scales with how badly the clamp is starving the shot: `lost` peaks in the corners, and
-  // in the goal there's barely room to pull back. Those are exactly the spots you can't see yer rig,
-  // so the camera quits easing and hustles instead of crawling over ~0.4s.
-  // (1 - b^dt === 1 - e^(-r*dt) with r = -ln(b); the open-field rates below match the old feel.)
-  const urgency = inGoal ? 1 : Math.min(1, (lost / CAM_DIST) * 2.0);
-  let posRate  =  7.6 + (22.0 -  7.6) * urgency;   // 95% settle: 0.39s open -> 0.14s cornered
-  let lookRate = 12.2 + (30.0 - 12.2) * urgency;   // 0.25s -> 0.10s
+  // Constant, gentle stiffness (~RL 0.45). The smoothed boom above already handles
+  // the starved-shot case, so there is no reason left to yank the rates around.
+  let posRate  =  7.6;
+  let lookRate = 12.2;
   // kickoff cinematic: glide down from the wide shot instead of snapping (countdown only)
   if(game.state==='countdown'){ posRate = 2.1; lookRate = 3.2; }
   // position stiffness (~RL 0.45 in the open)
@@ -10161,17 +10173,19 @@ function updateCamera(dt){
   // around the threshold (the reported "shaking sitting still").
   const lk = camLook.clone();
 
-  // ---- KEEP THE CAR IN SHOT (the guarantee) ----
-  // Sometimes ya can't sit behind the car AND stare at the ball: up a wall, "behind"
-  // is inside the wall, so aiming at the ball aims away from yer rig. Swing the aim
-  // toward the car until it's comfortably inside the frustum. Pure function of this
-  // frame — no feedback, so it can't jitter.
-  {
-    const LIMIT = 22;                                    // well inside the ~40° half-FOV
+  // ---- KEEP THE CAR IN SHOT — WALLS ONLY ----
+  // On flat ground this is NOT needed: ball-cam sits the lens on the ball→car line
+  // (car always between lens and ball) and car-cam sits behind the nose, so the car
+  // is already framed. Forcing it toward centre there FOUGHT ball-cam every time the
+  // ball drifted off to the side — the "camera constantly readjusting / snapping"
+  // ya saw. It's only genuinely impossible up a wall, where "behind the car" points
+  // INTO the wall, so gate the correction to that case.
+  if(p.wallAxis !== null){
+    const LIMIT = 24;
     const vC = p.pos.clone().sub(camPos), lC = vC.length();
     // halve the aim toward the car until it's within LIMIT — moving the aim point
-    // toward the car reduces the off-axis angle monotonically, so a few steps
-    // converge. Bounded loop, pure function of this frame → never jitters.
+    // toward the car reduces the off-axis angle monotonically, so it converges.
+    // Bounded loop, pure function of this frame → never jitters.
     for(let it = 0; it < 8; it++){
       const vL = lk.clone().sub(camPos), lL = vL.length();
       if(lL < 1e-4 || lC < 1e-4) break;

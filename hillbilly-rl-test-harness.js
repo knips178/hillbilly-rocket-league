@@ -514,6 +514,36 @@ game.player.wallAxis=null; game.player.up.set(0,1,0); game.player.pitch=0;
   console.log('camera keeps the car on screen at the wall base, up the wall, in corners and in goal');
 }
 
+// --- REPORTED: "camera keeps readjusting / screen shaking" ---
+// Drive along near the boards (where the boom gets starved and the snapping was
+// worst) and assert the camera never STEPS: no frame-to-frame jump may be a big
+// outlier against the typical motion. A snap shows up as a spike.
+{
+  const pl = game.player;
+  setBallCam(true);
+  pl.wallAxis=null; pl.up.set(0,1,0); pl.pitch=0; pl.yaw=0;
+  pl.pos.set(0, 0, ARENA.halfZ - WALL_R*1.5);        // hugging the side boards
+  pl.vel.set(0,0,0); ball.pos.set(0, BALL_R, 0); ball.vel.set(0,0,0);
+  camPos.copy(pl.pos); camPos.y += 3;
+  for(let i=0;i<120;i++) updateCamera(1/60);          // settle
+  const steps=[];
+  let prev = {x:camPos.x,y:camPos.y,z:camPos.z};
+  for(let i=0;i<300;i++){
+    // drive along the boards, weaving so the boom keeps re-fitting
+    updateCar(pl, 1/60, {throttle:1, steer:Math.sin(i/25)*0.6, boost:false});
+    updateCamera(1/60);
+    steps.push(Math.hypot(camPos.x-prev.x, camPos.y-prev.y, camPos.z-prev.z));
+    prev = {x:camPos.x,y:camPos.y,z:camPos.z};
+  }
+  const sorted = steps.slice().sort((a,b)=>a-b);
+  const med = sorted[Math.floor(sorted.length/2)] || 1e-6;
+  const worst = sorted[sorted.length-1];
+  // a smooth damped follow keeps every step near the median; a snap is a big spike
+  if(worst > Math.max(med*8, 0.5))
+    throw new Error('camera SNAPS while driving the boards: worst step '+worst.toFixed(3)+' vs median '+med.toFixed(3));
+  console.log('camera stays smooth along the boards — worst step '+worst.toFixed(3)+' vs median '+med.toFixed(3));
+}
+
 // --- kickoff must clear wall state and face the ball (reported: car sat sideways) ---
 {
   const pl = game.player;

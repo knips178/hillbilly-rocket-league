@@ -167,6 +167,22 @@ ball-cam, behind the nose in car-cam), then:
    axis. Up a wall ya genuinely cannot sit behind the car AND stare at the ball, so this frames both.
    Applied to the SMOOTHED aim against the real lens position — correcting the target just lagged.
 
+**The camera must contain NO discontinuities.** Reported twice as "camera constantly readjusting /
+screen shaking". Three separate causes, all now removed — do not reintroduce any of them:
+1. the gaze lean was gated on `squeeze > 0.15`, so crossing that threshold JUMPED the aim up to 80%
+   onto the car. Now continuous, proportional, no threshold.
+2. the smoothing RATES were ramped by how starved the shot was (`urgency`: pos 7.6→22, look 12.2→30),
+   so the camera kept flipping between gentle easing and a hard snap. Now constant.
+3. the boom length was used raw, so any step in the wall/goal limit stepped the camera with it. Now
+   `camFit` eases toward the fitted length and is never stepped.
+On an RL-sized pitch the car is near the boards most of the time, so these fired constantly.
+Harness pins it: driving along the boards, no frame-to-frame camera step may exceed 8x the median.
+
+**The keep-in-shot correction is WALLS ONLY.** On flat ground ball-cam already sits the lens on the
+ball→car line and car-cam sits behind the nose, so the car is framed anyway. Forcing it toward centre
+there fought ball-cam every time the ball drifted aside — the car is SUPPOSED to sit off-centre in
+ball-cam. It is only geometrically impossible up a wall, so that is the only place it applies.
+
 **No feedback in the aim.** `camLook` is a clean smoothed track of the target and is NEVER mutated
 by the framing correction — an earlier version did `camLook.lerp(car)` in place, which fed back into
 next frame's smoothing and made the view oscillate around the threshold (reported as "shaking sitting
